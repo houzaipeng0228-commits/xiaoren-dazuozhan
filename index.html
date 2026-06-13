@@ -131,6 +131,14 @@ const CODEX = {
 // 商店建筑（左上角）
 const shop = { x: 70, y: 70, w: 70, h: 60 };
 
+// 触屏设备节奏调整（手机屏幕小，整体放慢、怪变少）
+const IS_TOUCH = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+const ENEMY_SPEED_MUL = IS_TOUCH ? 0.7 : 1;
+const SPAWN_BATCH = IS_TOUCH ? 2 : 5;
+const ENEMY_CAP = IS_TOUCH ? 8 : 20;
+const INIT_SPAWN = IS_TOUCH ? 3 : 5;
+if (IS_TOUCH) { player.baseSpeed = 2.2; player.speed = 2.2; }
+
 // 静态装饰：花/树/石头（随机一次，不动）
 const decorations = [];
 function seedDecorations() {
@@ -189,23 +197,24 @@ function spawnEnemy() {
   const type = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
   let e;
   if (type === 'red') {
-    e = { type, x, y, size: 22, hp: 2, speed: 1.2, cd: 0 };
+    e = { type, x, y, size: 22, hp: 2, speed: 1.2 * ENEMY_SPEED_MUL, cd: 0 };
   } else if (type === 'green') {
-    e = { type, x, y, size: 24, hp: 2, speed: 0.6, cd: 60 + Math.random() * 60 };
+    e = { type, x, y, size: 24, hp: 2, speed: 0.6 * ENEMY_SPEED_MUL, cd: 60 + Math.random() * 60 };
   } else if (type === 'yellow') {
-    e = { type, x, y, size: 18, hp: 1, speed: 1.5, cd: 90 + Math.random() * 60, dashing: 0 };
+    e = { type, x, y, size: 18, hp: 1, speed: 1.5 * ENEMY_SPEED_MUL, cd: 90 + Math.random() * 60, dashing: 0 };
   } else if (type === 'bird') {
     // 暗影鸟：固定方向飞行
     const tx = player.x, ty = player.y;
     const a = Math.atan2(ty - y, tx - x);
-    e = { type, x, y, size: 18, hp: 1, speed: 3.4, vx: Math.cos(a) * 3.4, vy: Math.sin(a) * 3.4 };
+    const sp = 3.4 * ENEMY_SPEED_MUL;
+    e = { type, x, y, size: 18, hp: 1, speed: sp, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp };
   } else {
     // 自爆球
-    e = { type, x, y, size: 20, hp: 1, speed: 0.9, fuse: -1 };
+    e = { type, x, y, size: 20, hp: 1, speed: 0.9 * ENEMY_SPEED_MUL, fuse: -1 };
   }
   enemies.push(e);
 }
-for (let i = 0; i < 5; i++) spawnEnemy();
+for (let i = 0; i < INIT_SPAWN; i++) spawnEnemy();
 
 const keys = {};
 addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
@@ -225,11 +234,10 @@ function spawnBoss() {
   bosses.push(b);
 }
 
-// 一次刷新 5 个小怪（boss战时不刷）
+// 一次刷新一批小怪（boss战时不刷）
 function refreshEnemies() {
   if (bosses.length > 0) return;
-  const cap = 20;
-  for (let i = 0; i < 5 && enemies.length < cap; i++) spawnEnemy();
+  for (let i = 0; i < SPAWN_BATCH && enemies.length < ENEMY_CAP; i++) spawnEnemy();
 }
 
 function update() {
@@ -569,7 +577,8 @@ function update() {
         if (b.summonCd <= 0) {
           for (let k = 0; k < 2; k++) {
             const a = Math.atan2(player.y - b.y, player.x - b.x) + (k - 0.5) * 0.3;
-            enemies.push({ type: 'bird', x: b.x, y: b.y, size: 18, hp: 1, speed: 3.4, vx: Math.cos(a) * 3.4, vy: Math.sin(a) * 3.4 });
+            const sp = 3.4 * ENEMY_SPEED_MUL;
+            enemies.push({ type: 'bird', x: b.x, y: b.y, size: 18, hp: 1, speed: sp, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp });
           }
           b.summonCd = 360;
         }
@@ -1535,7 +1544,7 @@ addEventListener('keydown', e => {
     freezeWaves.length = 0;
     explosions.length = 0;
     tornado.active = 0;
-    for (let i = 0; i < 5; i++) spawnEnemy();
+    for (let i = 0; i < INIT_SPAWN; i++) spawnEnemy();
   }
 });
 

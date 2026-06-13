@@ -301,9 +301,9 @@ const shop = { x: 70, y: 70, w: 70, h: 60 };
 
 // 触屏设备节奏调整（手机屏幕小，整体放慢、怪变少；按屏幕宽度分档）
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
-// 越小的屏越慢：小手机 0.35，大手机 0.42，平板 0.56（在之前基础上再慢 30%）
+// 越小的屏越慢：再降 30% 后 = 当前 0.7 倍
 const TOUCH_SCALE = IS_TOUCH
-  ? (window.innerWidth < 420 ? 0.35 : (window.innerWidth < 720 ? 0.42 : 0.56))
+  ? (window.innerWidth < 420 ? 0.245 : (window.innerWidth < 720 ? 0.294 : 0.392))
   : 1;
 const ENEMY_SPEED_MUL = TOUCH_SCALE;
 const SPAWN_BATCH = IS_TOUCH ? 2 : 5;
@@ -402,11 +402,11 @@ function spawnBoss() {
   const types = ['bat', 'turtle', 'pyro', 'wizard', 'dragon'];
   const type = types[(bossesTriggered - 1) % types.length];
   let b;
-  if (type === 'bat')    b = { type, hp: 28, maxHp: 28, size: 52, speed: 2.2, cd: 0, soundCd: 240 };
-  if (type === 'turtle') b = { type, hp: 42, maxHp: 42, size: 60, speed: 0.7, spinCd: 360, spinning: 0 };
-  if (type === 'pyro')   b = { type, hp: 34, maxHp: 34, size: 50, speed: 0.7, cd: 60, ringCd: 300, frozen: 0 };
+  if (type === 'bat')    b = { type, hp: 28, maxHp: 28, size: 52, speed: 2.2 * ENEMY_SPEED_MUL, cd: 0, soundCd: 240 };
+  if (type === 'turtle') b = { type, hp: 42, maxHp: 42, size: 60, speed: 0.7 * ENEMY_SPEED_MUL, spinCd: 360, spinning: 0 };
+  if (type === 'pyro')   b = { type, hp: 34, maxHp: 34, size: 50, speed: 0.7 * ENEMY_SPEED_MUL, cd: 60, ringCd: 300, frozen: 0 };
   if (type === 'wizard') b = { type, hp: 38, maxHp: 38, size: 44, speed: 0, cd: 80, teleportCd: 200, summonCd: 360 };
-  if (type === 'dragon') b = { type, hp: 56, maxHp: 56, size: 72, speed: 1.4, cd: 100, chargeCd: 420, charging: 0 };
+  if (type === 'dragon') b = { type, hp: 56, maxHp: 56, size: 72, speed: 1.4 * ENEMY_SPEED_MUL, cd: 100, chargeCd: 420, charging: 0 };
   b.x = W/2; b.y = -90;
   b.entering = 100;
   bosses.push(b);
@@ -612,7 +612,7 @@ function update() {
       e.y += (ey / dist) * e.speed;
       e.cd--;
       if (e.cd <= 0 && dist < 280 && dist > 60) {
-        const sp = 2.2;
+        const sp = 2.2 * ENEMY_SPEED_MUL;
         projectiles.push({ x: e.x, y: e.y, vx: (ex/dist)*sp, vy: (ey/dist)*sp, life: 90 });
         e.cd = 100 + Math.random() * 60;
       }
@@ -728,7 +728,7 @@ function update() {
         if (b.soundCd <= 0) {
           for (let k = 0; k < 8; k++) {
             const ang = (k / 8) * Math.PI * 2;
-            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.2, vy: Math.sin(ang) * 2.2, life: 100, shadow: true });
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.2 * ENEMY_SPEED_MUL, vy: Math.sin(ang) * 2.2 * ENEMY_SPEED_MUL, life: 100, shadow: true });
           }
           b.soundCd = 240;
         }
@@ -754,7 +754,7 @@ function update() {
           for (let k = -2; k <= 2; k++) {
             const baseAng = Math.atan2(by, bx);
             const ang = baseAng + k * 0.2;
-            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.4, vy: Math.sin(ang) * 2.4, life: 120, fire: true });
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.4 * ENEMY_SPEED_MUL, vy: Math.sin(ang) * 2.4 * ENEMY_SPEED_MUL, life: 120, fire: true });
           }
           b.cd = 90;
         }
@@ -763,7 +763,7 @@ function update() {
         if (b.ringCd <= 0) {
           for (let k = 0; k < 12; k++) {
             const ang = (k / 12) * Math.PI * 2;
-            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.2, vy: Math.sin(ang) * 2.2, life: 140, fire: true });
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.2 * ENEMY_SPEED_MUL, vy: Math.sin(ang) * 2.2 * ENEMY_SPEED_MUL, life: 140, fire: true });
           }
           b.ringCd = 300;
         }
@@ -785,7 +785,7 @@ function update() {
           for (let k = 0; k < 2; k++) {
             const baseAng = Math.atan2(by, bx);
             const ang = baseAng + (k - 0.5) * 0.15;
-            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.8, vy: Math.sin(ang) * 2.8, life: 130, shadow: true });
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.8 * ENEMY_SPEED_MUL, vy: Math.sin(ang) * 2.8 * ENEMY_SPEED_MUL, life: 130, shadow: true });
           }
           b.cd = 70;
         }
@@ -817,7 +817,7 @@ function update() {
           for (let k = -1; k <= 1; k++) {
             const baseAng = Math.atan2(by, bx);
             const ang = baseAng + k * 0.35;
-            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 3.0, vy: Math.sin(ang) * 3.0, life: 140, fire: true });
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 3.0 * ENEMY_SPEED_MUL, vy: Math.sin(ang) * 3.0 * ENEMY_SPEED_MUL, life: 140, fire: true });
           }
           b.cd = 80;
         }

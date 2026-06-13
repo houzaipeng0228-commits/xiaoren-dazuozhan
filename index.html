@@ -108,11 +108,17 @@ function initAudio() {
   } catch (e) { ac = null; }
 }
 function unlockAudio() { initAudio(); if (ac && ac.state === 'suspended') ac.resume(); startBgm(); }
-window.addEventListener('keydown', unlockAudio, { once: true });
-window.addEventListener('pointerdown', unlockAudio, { once: true });
+// 不限 once：移动浏览器切后台/锁屏回来后 ctx 会被挂起，每次交互都尝试恢复
+window.addEventListener('keydown', unlockAudio);
+window.addEventListener('pointerdown', unlockAudio);
+window.addEventListener('touchstart', unlockAudio, { passive: true });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && ac && ac.state === 'suspended') ac.resume();
+});
 
 function tone(freq, dur, opts = {}) {
   if (!ac || muted) return;
+  if (ac.state === 'suspended') { ac.resume().catch(() => {}); }
   const t = ac.currentTime;
   const osc = ac.createOscillator();
   const g = ac.createGain();

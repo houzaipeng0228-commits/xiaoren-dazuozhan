@@ -107,7 +107,7 @@ function initAudio() {
     masterGain.connect(ac.destination);
   } catch (e) { ac = null; }
 }
-function unlockAudio() { initAudio(); if (ac && ac.state === 'suspended') ac.resume(); }
+function unlockAudio() { initAudio(); if (ac && ac.state === 'suspended') ac.resume(); startBgm(); }
 window.addEventListener('keydown', unlockAudio, { once: true });
 window.addEventListener('pointerdown', unlockAudio, { once: true });
 
@@ -169,6 +169,84 @@ const SFX = {
 };
 let _wasDead = false;
 let _lastHp = 5;
+
+// === 背景音乐：英雄冒险主题 (C 大调) ===
+let bgmGain = null;
+let bgmActive = false;
+let bgmNextTime = 0;
+let bgmStep = 0;
+const BGM_BPM = 112;
+const BGM_BEAT = 60 / BGM_BPM;
+
+// 4 小节循环：32 个半拍音符（每拍 2 个）
+const MELODY = [
+  // 小节1：英雄主题登场（C major arpeggio）
+  [60,0.5], [67,0.5], [72,0.5], [67,0.5],
+  [60,0.5], [67,0.5], [64,0.5], [60,0.5],
+  // 小节2：上扬到 A minor 色彩
+  [69,0.5], [72,0.5], [76,0.5], [72,0.5],
+  [69,0.5], [72,0.5], [67,0.5], [64,0.5],
+  // 小节3：F-G 推进
+  [65,0.5], [67,0.5], [69,0.5], [67,0.5],
+  [65,0.5], [64,0.5], [62,0.5], [60,0.5],
+  // 小节4：V-I 解决回 C
+  [64,0.5], [65,0.5], [67,0.5], [72,0.5],
+  [62,0.5], [64,0.5], [67,0.5], [72,0.5],
+];
+const BASS = [
+  // 每拍一个音，每小节 4 拍
+  [36,1], [36,1], [41,1], [43,1],   // C C F G
+  [33,1], [33,1], [38,1], [43,1],   // A A D G
+  [41,1], [36,1], [38,1], [43,1],   // F C D G
+  [36,1], [43,1], [36,1], [43,1],   // C G C G
+];
+function n2f(n) { return 440 * Math.pow(2, (n - 69) / 12); }
+function ensureBgmGain() {
+  if (!ac || bgmGain) return;
+  bgmGain = ac.createGain();
+  bgmGain.gain.value = 0.22;
+  bgmGain.connect(masterGain);
+}
+function scheduleBgmNote(freq, dur, time, type, vol) {
+  if (!ac || !bgmGain) return;
+  const o = ac.createOscillator();
+  const g = ac.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0, time);
+  g.gain.linearRampToValueAtTime(vol, time + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.001, time + dur * 0.95);
+  o.connect(g).connect(bgmGain);
+  o.start(time);
+  o.stop(time + dur);
+}
+function bgmTick() {
+  if (!ac || !bgmActive || muted) return;
+  ensureBgmGain();
+  while (bgmNextTime < ac.currentTime + 0.25) {
+    const midx = bgmStep % MELODY.length;
+    const mn = MELODY[midx];
+    if (mn[0] > 0) scheduleBgmNote(n2f(mn[0] + 12), BGM_BEAT * mn[1] * 0.9, bgmNextTime, 'triangle', 0.075);
+    // bass 在整拍 (step % 2 === 0)
+    if (bgmStep % 2 === 0) {
+      const bidx = (bgmStep / 2) % BASS.length;
+      const bn = BASS[bidx];
+      if (bn[0] > 0) scheduleBgmNote(n2f(bn[0]), BGM_BEAT * bn[1] * 0.92, bgmNextTime, 'sawtooth', 0.05);
+    }
+    bgmStep++;
+    bgmNextTime += BGM_BEAT * 0.5;
+  }
+  setTimeout(bgmTick, 80);
+}
+function startBgm() {
+  if (!ac || bgmActive || muted) return;
+  ensureBgmGain();
+  bgmActive = true;
+  bgmStep = 0;
+  bgmNextTime = ac.currentTime + 0.12;
+  bgmTick();
+}
+function stopBgm() { bgmActive = false; }
 
 const player = { x: W/2, y: H/2, size: 24, baseSpeed: 3, speed: 3, hp: 5, maxHp: 5, coin: 0, totalCoin: 0, rock: 0, potion: 0, dir: 'down', attacking: 0, skillActive: 0, skillCD: 0, regenTick: 0, equippedSkill: 'dash', ownedSkills: ['dash'], currentMap: 'forest', unlockedMaps: ['forest'] };
 
@@ -2209,10 +2287,16 @@ muteBtn.addEventListener('pointerdown', e => {
   e.preventDefault();
   muted = !muted;
   updateMuteUI();
-  if (!muted) { initAudio(); if (ac && ac.state === 'suspended') ac.resume(); SFX.click(); }
+  if (muted) { stopBgm(); }
+  else { initAudio(); if (ac && ac.state === 'suspended') ac.resume(); SFX.click(); startBgm(); }
 });
 window.addEventListener('keydown', e => {
-  if (e.key.toLowerCase() === 'm') { muted = !muted; updateMuteUI(); if (!muted) SFX.click(); }
+  if (e.key.toLowerCase() === 'm') {
+    muted = !muted;
+    updateMuteUI();
+    if (muted) stopBgm();
+    else { SFX.click(); startBgm(); }
+  }
 });
 
 // === 触屏控制：摇杆 + 按钮 + 商店/图鉴卡片点击 ===

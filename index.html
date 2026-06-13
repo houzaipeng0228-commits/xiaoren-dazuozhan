@@ -301,9 +301,9 @@ const shop = { x: 70, y: 70, w: 70, h: 60 };
 
 // 触屏设备节奏调整（手机屏幕小，整体放慢、怪变少；按屏幕宽度分档）
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
-// 越小的屏越慢：小手机 0.5，大手机 0.6，平板 0.8
+// 越小的屏越慢：小手机 0.35，大手机 0.42，平板 0.56（在之前基础上再慢 30%）
 const TOUCH_SCALE = IS_TOUCH
-  ? (window.innerWidth < 420 ? 0.5 : (window.innerWidth < 720 ? 0.6 : 0.8))
+  ? (window.innerWidth < 420 ? 0.35 : (window.innerWidth < 720 ? 0.42 : 0.56))
   : 1;
 const ENEMY_SPEED_MUL = TOUCH_SCALE;
 const SPAWN_BATCH = IS_TOUCH ? 2 : 5;

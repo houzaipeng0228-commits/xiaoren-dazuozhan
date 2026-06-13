@@ -1,0 +1,1485 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>小人大作战</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #2b2b2b; font-family: -apple-system, sans-serif; color: #fff; }
+  canvas { display: block; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #4a7c4a; image-rendering: pixelated; }
+  .title-bar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.7); z-index: 10; pointer-events: none; }
+  #hud { position: fixed; top: 8px; left: 12px; font-size: 18px; background: rgba(0,0,0,0.45); padding: 6px 14px; border-radius: 8px; z-index: 10; pointer-events: none; }
+  .hint { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); color: #ddd; font-size: 13px; background: rgba(0,0,0,0.4); padding: 4px 12px; border-radius: 6px; z-index: 10; pointer-events: none; white-space: nowrap; }
+</style>
+</head>
+<body>
+  <div class="title-bar">⚔️ 小人大作战 ⚔️</div>
+  <div id="hud">❤️ <span id="hp">5</span>　💰 <span id="coin">0</span>　🪨 <span id="rock">0</span>　❤️‍🩹 <span id="potion">0</span>　🎯 <span id="skill">💨冲刺</span>　⏱️<span id="skillCD">就绪</span></div>
+  <div class="hint">方向键/WASD 移动 · 空格 挥剑 · E 用技能 · Q 用道具 · B 商店 · T 图鉴 · P 暂停</div>
+  <canvas id="game"></canvas>
+
+<script>
+const cv = document.getElementById('game');
+const ctx = cv.getContext('2d');
+let W = window.innerWidth;
+let H = window.innerHeight;
+cv.width = W;
+cv.height = H;
+
+const player = { x: W/2, y: H/2, size: 24, baseSpeed: 3, speed: 3, hp: 5, maxHp: 5, coin: 0, totalCoin: 0, rock: 0, potion: 0, dir: 'down', attacking: 0, skillActive: 0, skillCD: 0, regenTick: 0, equippedSkill: 'dash', ownedSkills: ['dash'] };
+
+let gameState = 'play'; // 'play' | 'shop' | 'codex'
+let bossesTriggered = 0;
+const bosses = [];
+const fireBeams = []; // 火焰刃特效 {x,y,dir,t}
+const freezeWaves = []; // 冰冻波特效 {x,y,t}
+const tornado = { active: 0, cd: 0, x: 0, y: 0 }; // 龙卷风跟随玩家
+const explosions = []; // 自爆球爆炸 {x,y,t}
+
+const SKILLS = {
+  dash:    { name: '💨 冲刺',     desc: '按E 0.5秒加速2.2倍，CD 3秒',       price: 0,   active: true  },
+  whirl:   { name: '🌀 旋风斩',   desc: '按E 1秒大范围旋风，CD 6秒',        price: 25,  active: true  },
+  bolt:    { name: '⚡ 闪电链',   desc: '被动：挥剑命中自动劈最近的怪',      price: 40,  active: false },
+  shield:  { name: '🛡️ 护盾',     desc: '被动：50%概率挡掉伤害',            price: 60,  active: false },
+  fire:    { name: '🔥 火焰刃',   desc: '按E朝面前喷火，伤害3，CD 4秒',     price: 35,  active: true  },
+  freeze:  { name: '❄️ 冰冻波',   desc: '按E冻住附近怪1.5秒，CD 7秒',       price: 45,  active: true  },
+  regen:   { name: '🌱 回春',     desc: '被动：每5秒自动回1血',             price: 50,  active: false },
+  wind:    { name: '👟 疾风',     desc: '被动：移动速度永久+40%',           price: 40,  active: false },
+  tornado: { name: '🌪️ 龙卷风',   desc: '按E召唤跟随的龙卷风3秒，吸怪伤害',  price: 70,  active: true  },
+  vamp:    { name: '🩸 吸血',     desc: '被动：挥剑命中50%概率回1血',        price: 55,  active: false },
+};
+const SKILL_ORDER = ['dash', 'whirl', 'bolt', 'shield', 'fire', 'freeze', 'regen', 'wind', 'tornado', 'vamp'];
+
+// 怪物图鉴 / Boss 弱点
+const CODEX = {
+  red:    { name: '🟥 红怪',          desc: '直冲玩家。HP 2',                      weakness: '无特殊' },
+  green:  { name: '🟢 绿怪',          desc: '远程吐口水。HP 2',                    weakness: '走位躲' },
+  yellow: { name: '🔺 黄三角',        desc: '会突然冲刺，HP 1 超脆',               weakness: '冰冻秒杀' },
+  bird:   { name: '🪶 暗影鸟',        desc: '高速直线飞，撞到扣血。HP 1',          weakness: '范围技能' },
+  bomber: { name: '💣 自爆球',        desc: '靠近后1秒倒数爆炸。HP 1',             weakness: '远距离击杀' },
+  bat:    { name: '🦇 暗影蝙蝠 BOSS', desc: '高速突进 + 8方向声波。HP 28',         weakness: '🌀 旋风斩 ×3' },
+  turtle: { name: '🐢 铁壳龟 BOSS',   desc: '会突然旋转冲撞，普通伤害减半。HP 42', weakness: '🪨 落石 ×3' },
+  pyro:   { name: '🔥 烈焰魔 BOSS',   desc: '五连火球 + 12 颗圆周火球。HP 34',     weakness: '❄️ 冰冻时 ×3' },
+  wizard: { name: '🧙 暗影巫师 BOSS', desc: '瞬移 + 暗影球 + 召唤暗影鸟。HP 38',   weakness: '🔥 火焰刃 ×3' },
+  dragon: { name: '🐉 巨龙 BOSS',     desc: '扇形火焰 + 高速冲撞。HP 56',          weakness: '⚡ 闪电链 ×3' },
+};
+
+// 商店建筑（左上角）
+const shop = { x: 70, y: 70, w: 70, h: 60 };
+
+// 静态装饰：花/树/石头（随机一次，不动）
+const decorations = [];
+function seedDecorations() {
+  decorations.length = 0;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  // 数量随屏幕面积缩放
+  const scale = (W * H) / (640 * 480);
+  const nFlowers = Math.floor(14 * scale);
+  const nTrees = Math.floor(4 * scale);
+  const nRocks = Math.floor(5 * scale);
+  for (let i = 0; i < nFlowers; i++) {
+    let x, y;
+    do { x = rand(20, W - 20); y = rand(20, H - 20); }
+    while (x < shop.x + shop.w + 30 && y < shop.y + shop.h + 30);
+    decorations.push({ type: 'flower', x, y, color: ['#ff5f7a', '#ffd93d', '#a78bfa'][Math.floor(Math.random() * 3)] });
+  }
+  for (let i = 0; i < nTrees; i++) {
+    let x, y;
+    do { x = rand(40, W - 40); y = rand(40, H - 40); }
+    while ((x < shop.x + shop.w + 60 && y < shop.y + shop.h + 60) || Math.hypot(x - W/2, y - H/2) < 80);
+    decorations.push({ type: 'tree', x, y });
+  }
+  for (let i = 0; i < nRocks; i++) {
+    decorations.push({ type: 'rock', x: rand(30, W - 30), y: rand(30, H - 30) });
+  }
+}
+seedDecorations();
+
+// 窗口大小变化：重设 canvas + 重新生成装饰 + 防玩家出界
+window.addEventListener('resize', () => {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  cv.width = W;
+  cv.height = H;
+  player.x = Math.max(player.size, Math.min(W - player.size, player.x));
+  player.y = Math.max(player.size, Math.min(H - player.size, player.y));
+  seedDecorations();
+});
+
+const enemies = [];
+const coins = [];
+const items = [];
+const rockStrikes = [];
+const projectiles = [];  // 怪物吐的口水 {x, y, vx, vy, life}
+
+// 怪物类型: red=普通冲撞, green=远程吐口水(慢), yellow=偶尔冲刺(脆皮), bird=高速直线飞鸟, bomber=自爆球
+const ENEMY_TYPES = ['red', 'green', 'yellow', 'bird', 'bomber'];
+
+function spawnEnemy() {
+  const side = Math.floor(Math.random() * 4);
+  let x, y;
+  if (side === 0) { x = 0; y = Math.random() * H; }
+  else if (side === 1) { x = W; y = Math.random() * H; }
+  else if (side === 2) { x = Math.random() * W; y = 0; }
+  else { x = Math.random() * W; y = H; }
+  const type = ENEMY_TYPES[Math.floor(Math.random() * ENEMY_TYPES.length)];
+  let e;
+  if (type === 'red') {
+    e = { type, x, y, size: 22, hp: 2, speed: 1.2, cd: 0 };
+  } else if (type === 'green') {
+    e = { type, x, y, size: 24, hp: 2, speed: 0.6, cd: 60 + Math.random() * 60 };
+  } else if (type === 'yellow') {
+    e = { type, x, y, size: 18, hp: 1, speed: 1.5, cd: 90 + Math.random() * 60, dashing: 0 };
+  } else if (type === 'bird') {
+    // 暗影鸟：固定方向飞行
+    const tx = player.x, ty = player.y;
+    const a = Math.atan2(ty - y, tx - x);
+    e = { type, x, y, size: 18, hp: 1, speed: 3.4, vx: Math.cos(a) * 3.4, vy: Math.sin(a) * 3.4 };
+  } else {
+    // 自爆球
+    e = { type, x, y, size: 20, hp: 1, speed: 0.9, fuse: -1 };
+  }
+  enemies.push(e);
+}
+for (let i = 0; i < 5; i++) spawnEnemy();
+
+const keys = {};
+addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ') e.preventDefault(); });
+addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+function spawnBoss() {
+  const types = ['bat', 'turtle', 'pyro', 'wizard', 'dragon'];
+  const type = types[(bossesTriggered - 1) % types.length];
+  let b;
+  if (type === 'bat')    b = { type, hp: 28, maxHp: 28, size: 52, speed: 2.2, cd: 0, soundCd: 240 };
+  if (type === 'turtle') b = { type, hp: 42, maxHp: 42, size: 60, speed: 0.7, spinCd: 360, spinning: 0 };
+  if (type === 'pyro')   b = { type, hp: 34, maxHp: 34, size: 50, speed: 0.7, cd: 60, ringCd: 300, frozen: 0 };
+  if (type === 'wizard') b = { type, hp: 38, maxHp: 38, size: 44, speed: 0, cd: 80, teleportCd: 200, summonCd: 360 };
+  if (type === 'dragon') b = { type, hp: 56, maxHp: 56, size: 72, speed: 1.4, cd: 100, chargeCd: 420, charging: 0 };
+  b.x = W/2; b.y = -90;
+  b.entering = 100;
+  bosses.push(b);
+}
+
+// 一次刷新 5 个小怪（boss战时不刷）
+function refreshEnemies() {
+  if (bosses.length > 0) return;
+  const cap = 20;
+  for (let i = 0; i < 5 && enemies.length < cap; i++) spawnEnemy();
+}
+
+function update() {
+  // P 键暂停
+  if (keys['p'] && !player.pLocked) {
+    player.pLocked = true;
+    if (gameState === 'play') gameState = 'paused';
+    else if (gameState === 'paused') gameState = 'play';
+  }
+  if (!keys['p']) player.pLocked = false;
+  if (gameState === 'paused') return;
+
+  // T 打开/关闭图鉴
+  if (keys['t'] && !player.tLocked) {
+    player.tLocked = true;
+    if (gameState === 'play') gameState = 'codex';
+    else if (gameState === 'codex') gameState = 'play';
+  }
+  if (!keys['t']) player.tLocked = false;
+
+  // 商店进入/退出（B 键）
+  if (keys['b'] && !player.bLocked) {
+    player.bLocked = true;
+    const inShopRange = player.x > shop.x - 20 && player.x < shop.x + shop.w + 20 &&
+                        player.y > shop.y - 20 && player.y < shop.y + shop.h + 20;
+    if (gameState === 'play' && inShopRange) gameState = 'shop';
+    else if (gameState === 'shop') gameState = 'play';
+  }
+  if (!keys['b']) player.bLocked = false;
+
+  // 商店内：1-9 / 0 数字键购买/切换技能
+  if (gameState === 'shop') {
+    for (let i = 0; i < SKILL_ORDER.length; i++) {
+      const key = i === 9 ? '0' : String(i + 1);
+      if (keys[key] && !player[`num${i}Locked`]) {
+        player[`num${i}Locked`] = true;
+        const id = SKILL_ORDER[i];
+        const sk = SKILLS[id];
+        if (player.ownedSkills.includes(id)) {
+          player.equippedSkill = id;
+        } else if (player.coin >= sk.price) {
+          player.coin -= sk.price;
+          player.ownedSkills.push(id);
+          player.equippedSkill = id;
+        }
+      }
+      if (!keys[key]) player[`num${i}Locked`] = false;
+    }
+    return;
+  }
+  if (gameState === 'codex') return;  // 图鉴也暂停
+
+  // === 主动技能：E 触发 ===
+  const equipped = player.equippedSkill;
+  if (keys['e'] && player.skillCD <= 0 && player.skillActive <= 0) {
+    if (equipped === 'dash')   { player.skillActive = 30;  player.skillCD = 180; }
+    if (equipped === 'whirl')  { player.skillActive = 60;  player.skillCD = 360; }
+    if (equipped === 'fire')   {
+      player.skillActive = 12; player.skillCD = 240;
+      const angles = { up: -Math.PI/2, down: Math.PI/2, left: Math.PI, right: 0 };
+      const ang = angles[player.dir];
+      fireBeams.push({ x: player.x, y: player.y, ang, t: 25 });
+    }
+    if (equipped === 'freeze') {
+      player.skillActive = 18; player.skillCD = 420;
+      freezeWaves.push({ x: player.x, y: player.y, t: 20 });
+      for (const e of enemies) {
+        if (Math.hypot(e.x - player.x, e.y - player.y) < 140) e.frozen = 90;
+      }
+      for (const b of bosses) {
+        if (Math.hypot(b.x - player.x, b.y - player.y) < 160) b.frozen = 90;
+      }
+    }
+    if (equipped === 'tornado') {
+      player.skillActive = 180; player.skillCD = 540;
+      tornado.active = 180;
+    }
+  }
+  if (player.skillActive > 0) player.skillActive--;
+  if (player.skillCD > 0) player.skillCD--;
+  if (tornado.active > 0) tornado.active--;
+
+  // === 被动技能 ===
+  let speedMul = 1;
+  if (equipped === 'dash' && player.skillActive > 0) speedMul = 2.2;
+  if (equipped === 'wind') speedMul *= 1.4;
+  player.speed = player.baseSpeed * speedMul;
+
+  // 回春：每5秒(300帧)回1血
+  if (equipped === 'regen') {
+    player.regenTick++;
+    if (player.regenTick >= 300) {
+      player.regenTick = 0;
+      if (player.hp < player.maxHp) player.hp++;
+    }
+  } else {
+    player.regenTick = 0;
+  }
+
+  let dx = 0, dy = 0;
+  if (keys['arrowleft'] || keys['a']) { dx -= 1; player.dir = 'left'; }
+  if (keys['arrowright'] || keys['d']) { dx += 1; player.dir = 'right'; }
+  if (keys['arrowup'] || keys['w']) { dy -= 1; player.dir = 'up'; }
+  if (keys['arrowdown'] || keys['s']) { dy += 1; player.dir = 'down'; }
+  if (dx && dy) { dx *= 0.707; dy *= 0.707; }
+  player.x = Math.max(player.size/2, Math.min(W - player.size/2, player.x + dx * player.speed));
+  player.y = Math.max(player.size/2, Math.min(H - player.size/2, player.y + dy * player.speed));
+
+  if (keys[' '] && player.attacking <= 0) {
+    player.attacking = 16;
+  }
+  if (player.attacking > 0) player.attacking--;
+
+  // 360度环形攻击范围
+  const ATK_RADIUS = 55;
+  const WHIRL_RADIUS = 110;
+  const isAttacking = player.attacking > 0;
+  const isWhirling = equipped === 'whirl' && player.skillActive > 0;
+
+  // Q 键使用道具
+  if (keys['q'] && !player.qLocked) {
+    player.qLocked = true;
+    if (player.rock > 0) {
+      player.rock--;
+      // 对所有屏幕上敌人砸落石
+      for (const e of enemies) {
+        rockStrikes.push({ x: e.x, y: e.y, t: 30, target: e, source: 'rock' });
+      }
+      for (const b of bosses) {
+        rockStrikes.push({ x: b.x, y: b.y, t: 30, target: b, source: 'rock' });
+      }
+      if (enemies.length === 0 && bosses.length === 0) {
+        rockStrikes.push({ x: player.x, y: player.y - 60, t: 30, target: null, source: 'rock' });
+      }
+    } else if (player.potion > 0) {
+      player.potion--;
+      player.hp = Math.min(player.maxHp, player.hp + 3);
+    }
+  }
+  if (!keys['q']) player.qLocked = false;
+
+  // 敌人逻辑
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    const e = enemies[i];
+    const ex = player.x - e.x, ey = player.y - e.y;
+    const dist = Math.hypot(ex, ey) || 1;
+
+    if (e.frozen > 0) { e.frozen--; }
+    else if (e.type === 'red') {
+      // 冲撞型：朝玩家走
+      e.x += (ex / dist) * e.speed;
+      e.y += (ey / dist) * e.speed;
+    } else if (e.type === 'green') {
+      // 远程型：走得慢，定期吐口水
+      e.x += (ex / dist) * e.speed;
+      e.y += (ey / dist) * e.speed;
+      e.cd--;
+      if (e.cd <= 0 && dist < 280 && dist > 60) {
+        const sp = 2.2;
+        projectiles.push({ x: e.x, y: e.y, vx: (ex/dist)*sp, vy: (ey/dist)*sp, life: 90 });
+        e.cd = 100 + Math.random() * 60;
+      }
+    } else if (e.type === 'yellow') {
+      // 冲刺型：偶尔短冲一下
+      e.cd--;
+      if (e.cd <= 0 && dist < 220) { e.dashing = 18; e.cd = 120 + Math.random() * 60; }
+      const sp = e.dashing > 0 ? e.speed * 3 : e.speed;
+      if (e.dashing > 0) e.dashing--;
+      e.x += (ex / dist) * sp;
+      e.y += (ey / dist) * sp;
+    } else if (e.type === 'bird') {
+      // 暗影鸟：固定方向飞，飞出屏幕就死
+      e.x += e.vx; e.y += e.vy;
+      if (e.x < -30 || e.x > W + 30 || e.y < -30 || e.y > H + 30) {
+        enemies.splice(i, 1);
+        setTimeout(refreshEnemies, 1500);
+        continue;
+      }
+    } else if (e.type === 'bomber') {
+      // 自爆球
+      if (e.fuse < 0) {
+        // 还没点引信，追玩家
+        e.x += (ex / dist) * e.speed;
+        e.y += (ey / dist) * e.speed;
+        if (dist < 60) e.fuse = 60;  // 进入近距离点引信
+      } else {
+        e.fuse--;
+        if (e.fuse <= 0) {
+          // 爆炸：范围伤害玩家
+          explosions.push({ x: e.x, y: e.y, t: 25 });
+          if (Math.hypot(player.x - e.x, player.y - e.y) < 60) {
+            if (!(equipped === 'shield' && Math.random() < 0.5)) {
+              player.hp = Math.max(0, player.hp - 2);
+            }
+          }
+          enemies.splice(i, 1);
+          setTimeout(refreshEnemies, 1500);
+          continue;
+        }
+      }
+    }
+
+    // 攻击命中（环形 360° + 旋风斩）
+    const distToPlayer = Math.hypot(ex, ey);
+    const swordHit = isAttacking && distToPlayer < ATK_RADIUS + e.size/2;
+    const whirlHit = isWhirling && distToPlayer < WHIRL_RADIUS + e.size/2 && (player.skillActive % 6 === 0);
+    if (swordHit || whirlHit) {
+      e.hp -= whirlHit ? 2 : 1;
+      e.x -= (ex / dist) * (whirlHit ? 6 : 25);
+      e.y -= (ey / dist) * (whirlHit ? 6 : 25);
+
+      // 吸血被动：挥剑命中50%概率回1血
+      if (swordHit && equipped === 'vamp' && Math.random() < 0.5 && player.hp < player.maxHp) {
+        player.hp++;
+      }
+
+      // 闪电链：装备 bolt 时，挥剑命中自动劈最近的另一只
+      if (swordHit && equipped === 'bolt') {
+        let nearest = null, nd = 9999;
+        for (const o of enemies) {
+          if (o === e) continue;
+          const d2 = Math.hypot(o.x - e.x, o.y - e.y);
+          if (d2 < nd) { nd = d2; nearest = o; }
+        }
+        if (nearest && nd < 220) {
+          nearest.hp--;
+          rockStrikes.push({ x: nearest.x, y: nearest.y, t: 6, target: null, bolt: { fromX: e.x, fromY: e.y } });
+        }
+      }
+
+      if (e.hp <= 0) {
+        const gold = Math.floor(Math.random() * 4); // 0-3 随机
+        for (let g = 0; g < gold; g++) {
+          coins.push({ x: e.x + (Math.random() - 0.5) * 16, y: e.y + (Math.random() - 0.5) * 16 });
+        }
+        if (Math.random() < 0.08) {
+          const type = Math.random() < 0.5 ? 'rock' : 'potion';
+          items.push({ x: e.x + 10, y: e.y + 10, type });
+        }
+        enemies.splice(i, 1);
+        setTimeout(refreshEnemies, 1500);
+        continue;
+      }
+    }
+
+    // 碰到玩家扣血（护盾被动：50%概率免疫）
+    if (distToPlayer < (player.size + e.size) / 2 && player.attacking <= 6) {
+      if (!(equipped === 'shield' && Math.random() < 0.5)) {
+        player.hp = Math.max(0, player.hp - 1);
+      }
+      e.x -= (ex / dist) * 40;
+      e.y -= (ey / dist) * 40;
+    }
+  }
+
+  // === Boss 更新 ===
+  for (let i = bosses.length - 1; i >= 0; i--) {
+    const b = bosses[i];
+    if (b.entering > 0) { b.entering--; b.y = Math.min(b.y + 2.2, 100); continue; }
+    if (b.frozen > 0) b.frozen--;
+    const bx = player.x - b.x, by = player.y - b.y;
+    const bdist = Math.hypot(bx, by) || 1;
+
+    if (b.frozen <= 0) {
+      if (b.type === 'bat') {
+        // 高速直冲 + 抖动
+        b.x += (bx / bdist) * b.speed + Math.sin(Date.now() / 200) * 0.8;
+        b.y += (by / bdist) * b.speed + Math.cos(Date.now() / 220) * 0.8;
+        // 新招：声波 — 周期性向8方向发射暗影球
+        b.soundCd--;
+        if (b.soundCd <= 0) {
+          for (let k = 0; k < 8; k++) {
+            const ang = (k / 8) * Math.PI * 2;
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.2, vy: Math.sin(ang) * 2.2, life: 100, shadow: true });
+          }
+          b.soundCd = 240;
+        }
+      } else if (b.type === 'turtle') {
+        // 新招：旋转冲撞（高速冲3秒）
+        b.spinCd--;
+        if (b.spinCd <= 0) { b.spinning = 90; b.spinCd = 360; }
+        if (b.spinning > 0) {
+          b.spinning--;
+          b.x += (bx / bdist) * b.speed * 5;
+          b.y += (by / bdist) * b.speed * 5;
+        } else {
+          b.x += (bx / bdist) * b.speed;
+          b.y += (by / bdist) * b.speed;
+        }
+      } else if (b.type === 'pyro') {
+        // 缓慢移动
+        b.x += (bx / bdist) * b.speed;
+        b.y += (by / bdist) * b.speed;
+        // 五连火球
+        b.cd--;
+        if (b.cd <= 0 && bdist < 600) {
+          for (let k = -2; k <= 2; k++) {
+            const baseAng = Math.atan2(by, bx);
+            const ang = baseAng + k * 0.2;
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.4, vy: Math.sin(ang) * 2.4, life: 120, fire: true });
+          }
+          b.cd = 90;
+        }
+        // 新招：圆周火球（10颗 360°散开）
+        b.ringCd--;
+        if (b.ringCd <= 0) {
+          for (let k = 0; k < 12; k++) {
+            const ang = (k / 12) * Math.PI * 2;
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.2, vy: Math.sin(ang) * 2.2, life: 140, fire: true });
+          }
+          b.ringCd = 300;
+        }
+      } else if (b.type === 'wizard') {
+        // 瞬移
+        b.teleportCd--;
+        if (b.teleportCd <= 0) {
+          const ang = Math.random() * Math.PI * 2;
+          b.x = player.x + Math.cos(ang) * 180;
+          b.y = player.y + Math.sin(ang) * 180;
+          b.x = Math.max(60, Math.min(W - 60, b.x));
+          b.y = Math.max(60, Math.min(H - 60, b.y));
+          b.teleportCd = 180;
+          b.cd = 30;
+        }
+        // 连发暗影球
+        b.cd--;
+        if (b.cd <= 0 && bdist < 700) {
+          for (let k = 0; k < 2; k++) {
+            const baseAng = Math.atan2(by, bx);
+            const ang = baseAng + (k - 0.5) * 0.15;
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 2.8, vy: Math.sin(ang) * 2.8, life: 130, shadow: true });
+          }
+          b.cd = 70;
+        }
+        // 新招：召唤暗影鸟（2只）
+        b.summonCd--;
+        if (b.summonCd <= 0) {
+          for (let k = 0; k < 2; k++) {
+            const a = Math.atan2(player.y - b.y, player.x - b.x) + (k - 0.5) * 0.3;
+            enemies.push({ type: 'bird', x: b.x, y: b.y, size: 18, hp: 1, speed: 3.4, vx: Math.cos(a) * 3.4, vy: Math.sin(a) * 3.4 });
+          }
+          b.summonCd = 360;
+        }
+      } else if (b.type === 'dragon') {
+        // 新招：定期冲撞（90帧高速冲）
+        b.chargeCd--;
+        if (b.chargeCd <= 0) { b.charging = 60; b.chargeCd = 480; }
+        if (b.charging > 0) {
+          b.charging--;
+          b.x += (bx / bdist) * b.speed * 3.5;
+          b.y += (by / bdist) * b.speed * 3.5;
+        } else {
+          b.x += (bx / bdist) * b.speed;
+          b.y += (by / bdist) * b.speed;
+        }
+        // 扇形3连火焰
+        b.cd--;
+        if (b.cd <= 0 && bdist < 700) {
+          for (let k = -1; k <= 1; k++) {
+            const baseAng = Math.atan2(by, bx);
+            const ang = baseAng + k * 0.35;
+            projectiles.push({ x: b.x, y: b.y, vx: Math.cos(ang) * 3.0, vy: Math.sin(ang) * 3.0, life: 140, fire: true });
+          }
+          b.cd = 80;
+        }
+      }
+    }
+
+    // === 龙卷风持续伤害 Boss ===
+    if (tornado.active > 0 && bdist < 90 && tornado.active % 12 === 0) {
+      b.hp -= 1;
+      b.x -= (bx / bdist) * 4;
+      b.y -= (by / bdist) * 4;
+    }
+
+    // Boss 受到剑/旋风斩攻击
+    const swordHitB = isAttacking && bdist < ATK_RADIUS + b.size/2;
+    const whirlHitB = isWhirling && bdist < WHIRL_RADIUS + b.size/2 && (player.skillActive % 6 === 0);
+    if (swordHitB || whirlHitB) {
+      let dmg = whirlHitB ? 2 : 1;
+      // 弱点判定
+      if (b.type === 'pyro' && b.frozen > 0) dmg *= 3;
+      if (b.type === 'bat' && whirlHitB) dmg *= 3;
+      if (b.type === 'turtle') dmg = Math.max(1, Math.floor(dmg * 0.4));
+      b.hp -= dmg;
+      b.x -= (bx / bdist) * 8;
+      b.y -= (by / bdist) * 8;
+
+      if (swordHitB && equipped === 'vamp' && Math.random() < 0.5 && player.hp < player.maxHp) {
+        player.hp++;
+      }
+
+      if (swordHitB && equipped === 'bolt') {
+        // 闪电链：boss 弱点
+        let nearest = null, nd = 9999;
+        for (const o of enemies) {
+          const d2 = Math.hypot(o.x - b.x, o.y - b.y);
+          if (d2 < nd) { nd = d2; nearest = o; }
+        }
+        if (nearest && nd < 220) {
+          nearest.hp--;
+          rockStrikes.push({ x: nearest.x, y: nearest.y, t: 6, target: null, bolt: { fromX: b.x, fromY: b.y } });
+        }
+        // 巨龙弱点：闪电链对它直接 ×3 伤害
+        if (b.type === 'dragon') b.hp -= 2;  // 已经扣过dmg=1，再+2 = 3倍
+      }
+    }
+
+    // 火焰刃命中 Boss
+    for (const fb of fireBeams) {
+      if (fb.t < 22) {
+        const fx = fb.x + Math.cos(fb.ang) * 70;
+        const fy = fb.y + Math.sin(fb.ang) * 70;
+        if (Math.hypot(b.x - fx, b.y - fy) < 70) {
+          if (!b.fireHit || b.fireHit !== fb) {
+            b.fireHit = fb;
+            let dmg = 3;
+            if (b.type === 'pyro' && b.frozen > 0) dmg *= 3;
+            if (b.type === 'wizard') dmg *= 3;  // 巫师弱点
+            if (b.type === 'turtle') dmg = Math.max(1, Math.floor(dmg * 0.4));
+            b.hp -= dmg;
+          }
+        }
+      }
+    }
+
+    // Boss 死亡：爆 15-20 金币 + 1-3 个随机道具
+    if (b.hp <= 0) {
+      const coinDrop = 15 + Math.floor(Math.random() * 6);
+      for (let k = 0; k < coinDrop; k++) {
+        coins.push({ x: b.x + (Math.random() - 0.5) * 50, y: b.y + (Math.random() - 0.5) * 50 });
+      }
+      const lootCount = 1 + Math.floor(Math.random() * 3); // 1-3
+      const types = ['rock', 'potion'];
+      for (let k = 0; k < lootCount; k++) {
+        items.push({
+          x: b.x + (Math.random() - 0.5) * 40,
+          y: b.y + (Math.random() - 0.5) * 40,
+          type: types[Math.floor(Math.random() * types.length)]
+        });
+      }
+      bosses.splice(i, 1);
+      // boss死后，下次刷怪由 refreshEnemies 决定
+      setTimeout(refreshEnemies, 800);
+      continue;
+    }
+
+    // Boss 撞玩家扣血（boss 伤害 2）
+    if (bdist < (player.size + b.size) / 2 && player.attacking <= 6) {
+      if (!(equipped === 'shield' && Math.random() < 0.5)) {
+        player.hp = Math.max(0, player.hp - 2);
+      }
+      b.x -= (bx / bdist) * 30;
+      b.y -= (by / bdist) * 30;
+    }
+
+    // 边界约束：Boss 不允许出屏幕（顶部留 70px 给 HUD）
+    const pad = b.size / 2;
+    b.x = Math.max(pad, Math.min(W - pad, b.x));
+    b.y = Math.max(pad + 70, Math.min(H - pad, b.y));
+  }
+
+  // 龙卷风对小怪持续伤害
+  if (tornado.active > 0) {
+    tornado.x = player.x; tornado.y = player.y;
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      const e = enemies[j];
+      const td = Math.hypot(e.x - player.x, e.y - player.y);
+      if (td < 90) {
+        // 吸引
+        e.x += (player.x - e.x) * 0.04;
+        e.y += (player.y - e.y) * 0.04;
+        if (tornado.active % 10 === 0) {
+          e.hp--;
+          if (e.hp <= 0) {
+            const gold = Math.floor(Math.random() * 4);
+            for (let g = 0; g < gold; g++) coins.push({ x: e.x + (Math.random() - 0.5) * 16, y: e.y + (Math.random() - 0.5) * 16 });
+            if (Math.random() < 0.08) items.push({ x: e.x, y: e.y, type: Math.random() < 0.5 ? 'rock' : 'potion' });
+            enemies.splice(j, 1);
+            setTimeout(refreshEnemies, 1500);
+          }
+        }
+      }
+    }
+  }
+
+  // 爆炸特效倒数
+  for (let i = explosions.length - 1; i >= 0; i--) {
+    explosions[i].t--;
+    if (explosions[i].t <= 0) explosions.splice(i, 1);
+  }
+
+  // 火焰刃伤害（对小怪）
+  for (let fi = fireBeams.length - 1; fi >= 0; fi--) {
+    const fb = fireBeams[fi];
+    fb.t--;
+    if (fb.t < 22 && fb.t > 5) {
+      const fx = fb.x + Math.cos(fb.ang) * 70;
+      const fy = fb.y + Math.sin(fb.ang) * 70;
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const e = enemies[j];
+        if (!e._burnedBy || e._burnedBy !== fb) {
+          if (Math.hypot(e.x - fx, e.y - fy) < 70) {
+            e._burnedBy = fb;
+            e.hp -= 3;
+            if (e.hp <= 0) {
+              const gold = Math.floor(Math.random() * 4);
+              for (let g = 0; g < gold; g++) coins.push({ x: e.x + (Math.random() - 0.5) * 16, y: e.y + (Math.random() - 0.5) * 16 });
+              if (Math.random() < 0.08) items.push({ x: e.x, y: e.y, type: Math.random() < 0.5 ? 'rock' : 'potion' });
+              enemies.splice(j, 1);
+              setTimeout(refreshEnemies, 1500);
+            }
+          }
+        }
+      }
+    }
+    if (fb.t <= 0) fireBeams.splice(fi, 1);
+  }
+
+  // 冰冻波特效倒计时
+  for (let i = freezeWaves.length - 1; i >= 0; i--) {
+    freezeWaves[i].t--;
+    if (freezeWaves[i].t <= 0) freezeWaves.splice(i, 1);
+  }
+
+  // 落石更新：t 倒数，落地的瞬间造成伤害
+  for (let i = rockStrikes.length - 1; i >= 0; i--) {
+    const r = rockStrikes[i];
+    r.t--;
+    if (r.t === 5 && r.source === 'rock') {
+      // 落地伤害范围
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const e = enemies[j];
+        if (Math.hypot(e.x - r.x, e.y - r.y) < 60) {
+          e.hp -= 5;
+          if (e.hp <= 0) {
+            const gold = Math.floor(Math.random() * 4);
+            for (let g = 0; g < gold; g++) coins.push({ x: e.x + (Math.random() - 0.5) * 18, y: e.y + (Math.random() - 0.5) * 18 });
+            if (Math.random() < 0.08) {
+              const type = Math.random() < 0.5 ? 'rock' : 'potion';
+              items.push({ x: e.x, y: e.y, type });
+            }
+            enemies.splice(j, 1);
+            setTimeout(refreshEnemies, 1500);
+          }
+        }
+      }
+      // 落石对 Boss 命中（铁壳龟弱点 ×3）
+      for (let j = bosses.length - 1; j >= 0; j--) {
+        const b = bosses[j];
+        if (Math.hypot(b.x - r.x, b.y - r.y) < 70) {
+          let dmg = 5;
+          if (b.type === 'turtle') dmg *= 3;
+          if (b.type === 'pyro' && b.frozen > 0) dmg *= 3;
+          if (b.type === 'wizard') dmg = Math.max(2, Math.floor(dmg * 0.7));
+          b.hp -= dmg;
+        }
+      }
+    }
+    if (r.t <= 0) rockStrikes.splice(i, 1);
+  }
+
+  // 捡金币 / 道具
+  for (let i = coins.length - 1; i >= 0; i--) {
+    if (Math.hypot(player.x - coins[i].x, player.y - coins[i].y) < 20) {
+      coins.splice(i, 1);
+      player.coin++;
+      player.totalCoin++;
+      // 累计金币每100触发1个Boss
+      while (player.totalCoin >= (bossesTriggered + 1) * 100) {
+        bossesTriggered++;
+        spawnBoss();
+      }
+    }
+  }
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (Math.hypot(player.x - items[i].x, player.y - items[i].y) < 20) {
+      if (items[i].type === 'rock') player.rock++;
+      else player.potion++;
+      items.splice(i, 1);
+    }
+  }
+
+  // 口水弹更新
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    const p = projectiles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life--;
+    // 命中玩家
+    if (Math.hypot(p.x - player.x, p.y - player.y) < player.size/2 + 6) {
+      if (!(equipped === 'shield' && Math.random() < 0.5)) {
+        player.hp = Math.max(0, player.hp - 1);
+      }
+      projectiles.splice(i, 1);
+      continue;
+    }
+    if (p.life <= 0 || p.x < 0 || p.x > W || p.y < 0 || p.y > H) {
+      projectiles.splice(i, 1);
+    }
+  }
+
+  document.getElementById('hp').textContent = player.hp;
+  document.getElementById('coin').textContent = player.coin;
+  document.getElementById('rock').textContent = player.rock;
+  document.getElementById('potion').textContent = player.potion;
+  document.getElementById('skill').textContent = SKILLS[player.equippedSkill].name;
+  const cdEl = document.getElementById('skillCD');
+  if (!SKILLS[player.equippedSkill].active) cdEl.textContent = '被动';
+  else if (player.skillActive > 0) cdEl.textContent = '生效中!';
+  else if (player.skillCD > 0) cdEl.textContent = Math.ceil(player.skillCD / 60) + 's';
+  else cdEl.textContent = '就绪';
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  // 草地渐变
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#5e9a4d');
+  grad.addColorStop(1, '#3f7338');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  // 草丛纹理
+  ctx.fillStyle = '#3a6a3a';
+  for (let i = 0; i < 120; i++) {
+    const x = (i * 73) % W, y = (i * 131) % H;
+    ctx.fillRect(x, y, 2, 4);
+  }
+  // 土路（中央十字小道）
+  ctx.fillStyle = 'rgba(180,140,90,0.35)';
+  ctx.fillRect(W/2 - 30, 0, 60, H);
+  ctx.fillRect(0, H/2 - 25, W, 50);
+
+  // 装饰
+  for (const d of decorations) {
+    if (d.type === 'flower') {
+      ctx.fillStyle = d.color;
+      for (let a = 0; a < 5; a++) {
+        const ang = a * Math.PI * 2 / 5;
+        ctx.beginPath();
+        ctx.arc(d.x + Math.cos(ang) * 3, d.y + Math.sin(ang) * 3, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffeb3b';
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.type === 'tree') {
+      // 树影
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y + 18, 18, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 树干
+      ctx.fillStyle = '#6b4423';
+      ctx.fillRect(d.x - 3, d.y, 6, 14);
+      // 树冠
+      ctx.fillStyle = '#1f6b2c';
+      ctx.beginPath();
+      ctx.arc(d.x, d.y - 4, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2d8c3f';
+      ctx.beginPath();
+      ctx.arc(d.x - 5, d.y - 8, 8, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.type === 'rock') {
+      ctx.fillStyle = '#8a8a8a';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, 8, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#5a5a5a';
+      ctx.fillRect(d.x - 3, d.y - 2, 3, 2);
+    }
+  }
+
+  // 商店建筑
+  ctx.fillStyle = '#8b5a2b';
+  ctx.fillRect(shop.x, shop.y + 15, shop.w, shop.h - 15);
+  // 屋顶
+  ctx.fillStyle = '#a83232';
+  ctx.beginPath();
+  ctx.moveTo(shop.x - 5, shop.y + 18);
+  ctx.lineTo(shop.x + shop.w / 2, shop.y - 5);
+  ctx.lineTo(shop.x + shop.w + 5, shop.y + 18);
+  ctx.closePath();
+  ctx.fill();
+  // 门
+  ctx.fillStyle = '#4a2c14';
+  ctx.fillRect(shop.x + shop.w/2 - 9, shop.y + shop.h - 22, 18, 22);
+  // 窗
+  ctx.fillStyle = '#ffe066';
+  ctx.fillRect(shop.x + 8, shop.y + 22, 12, 10);
+  ctx.fillRect(shop.x + shop.w - 20, shop.y + 22, 12, 10);
+  // 招牌
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🏪 商店', shop.x + shop.w/2, shop.y - 8);
+
+  // 玩家靠近商店提示
+  const inShopRange = player.x > shop.x - 20 && player.x < shop.x + shop.w + 20 &&
+                      player.y > shop.y - 20 && player.y < shop.y + shop.h + 20;
+  if (inShopRange && gameState === 'play') {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('按 B 进入商店', shop.x + shop.w/2, shop.y + shop.h + 18);
+  }
+
+  // 金币
+  for (const c of coins) {
+    ctx.fillStyle = '#ffd700';
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#a07000';
+    ctx.stroke();
+  }
+  // 道具
+  for (const it of items) {
+    if (it.type === 'rock') {
+      ctx.fillStyle = '#888';
+      ctx.beginPath();
+      ctx.arc(it.x, it.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#333';
+      ctx.stroke();
+      ctx.fillStyle = '#555';
+      ctx.fillRect(it.x - 4, it.y - 3, 3, 3);
+    } else {
+      // 加血药水
+      ctx.fillStyle = '#ff4d6d';
+      ctx.fillRect(it.x - 6, it.y - 4, 12, 12);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(it.x - 1, it.y - 2, 2, 8);
+      ctx.fillRect(it.x - 4, it.y + 1, 8, 2);
+      ctx.fillStyle = '#aa2233';
+      ctx.fillRect(it.x - 3, it.y - 7, 6, 3);
+    }
+  }
+
+  // 敌人
+  for (const e of enemies) {
+    if (e.type === 'red') {
+      ctx.fillStyle = '#c0392b';
+      ctx.fillRect(e.x - e.size/2, e.y - e.size/2, e.size, e.size);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(e.x - 6, e.y - 4, 3, 3);
+      ctx.fillRect(e.x + 3, e.y - 4, 3, 3);
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(e.x - 4, e.y + 4, 8, 2); // 牙齿
+    } else if (e.type === 'green') {
+      ctx.fillStyle = '#27ae60';
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.size/2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(e.x - 6, e.y - 5, 4, 4);
+      ctx.fillRect(e.x + 2, e.y - 5, 4, 4);
+      ctx.fillStyle = '#000';
+      ctx.fillRect(e.x - 5, e.y - 4, 2, 2);
+      ctx.fillRect(e.x + 3, e.y - 4, 2, 2);
+      // 充能提示
+      if (e.cd < 25) {
+        ctx.fillStyle = `rgba(150,255,150,${(25 - e.cd)/25})`;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y + 4, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (e.type === 'yellow') {
+      ctx.fillStyle = e.dashing > 0 ? '#fff066' : '#f1c40f';
+      ctx.beginPath();
+      ctx.moveTo(e.x, e.y - e.size/2);
+      ctx.lineTo(e.x + e.size/2, e.y + e.size/2);
+      ctx.lineTo(e.x - e.size/2, e.y + e.size/2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillRect(e.x - 4, e.y, 2, 2);
+      ctx.fillRect(e.x + 2, e.y, 2, 2);
+    } else if (e.type === 'bird') {
+      // 暗影鸟：朝飞行方向的尖头
+      const ang = Math.atan2(e.vy, e.vx);
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      ctx.rotate(ang);
+      ctx.fillStyle = '#2a1a3a';
+      ctx.beginPath();
+      ctx.moveTo(10, 0);
+      ctx.lineTo(-8, -8);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(-8, 8);
+      ctx.closePath(); ctx.fill();
+      // 红眼
+      ctx.fillStyle = '#ff3030';
+      ctx.fillRect(2, -2, 3, 3);
+      ctx.restore();
+    } else if (e.type === 'bomber') {
+      const blink = e.fuse >= 0 ? (Math.sin(e.fuse * 0.5) > 0 ? '#ff2a2a' : '#ffd040') : '#444';
+      ctx.fillStyle = blink;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.size/2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      // 引信
+      ctx.fillStyle = '#aaa';
+      ctx.fillRect(e.x - 1, e.y - e.size/2 - 6, 2, 6);
+      if (e.fuse >= 0) {
+        ctx.fillStyle = '#ff8800';
+        ctx.beginPath();
+        ctx.arc(e.x, e.y - e.size/2 - 8, 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // 冻结覆盖
+    if (e.frozen > 0) {
+      ctx.fillStyle = 'rgba(160,220,255,0.55)';
+      ctx.fillRect(e.x - e.size/2 - 2, e.y - e.size/2 - 2, e.size + 4, e.size + 4);
+      ctx.strokeStyle = '#cce8ff';
+      ctx.strokeRect(e.x - e.size/2 - 2, e.y - e.size/2 - 2, e.size + 4, e.size + 4);
+    }
+  }
+
+  // Boss 绘制
+  for (const b of bosses) {
+    // 影子
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(b.x, b.y + b.size/2 + 4, b.size/2, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (b.type === 'bat') {
+      // 黑紫蝙蝠
+      ctx.fillStyle = '#3a1a4d';
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y, b.size/2, b.size/2 - 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 翅膀
+      const w = Math.sin(Date.now() / 80) * 6;
+      ctx.beginPath();
+      ctx.moveTo(b.x - b.size/2, b.y);
+      ctx.lineTo(b.x - b.size, b.y - 6 + w);
+      ctx.lineTo(b.x - b.size/2 - 4, b.y + 6);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.size/2, b.y);
+      ctx.lineTo(b.x + b.size, b.y - 6 + w);
+      ctx.lineTo(b.x + b.size/2 + 4, b.y + 6);
+      ctx.closePath(); ctx.fill();
+      // 红眼
+      ctx.fillStyle = '#ff4444';
+      ctx.fillRect(b.x - 7, b.y - 3, 4, 4);
+      ctx.fillRect(b.x + 3, b.y - 3, 4, 4);
+    } else if (b.type === 'turtle') {
+      // 绿龟壳
+      ctx.fillStyle = '#5a3a1a';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size/2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#7a5a2a';
+      for (let k = 0; k < 6; k++) {
+        const ang = k * Math.PI / 3;
+        ctx.beginPath();
+        ctx.arc(b.x + Math.cos(ang) * 10, b.y + Math.sin(ang) * 10, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 头
+      ctx.fillStyle = '#7caf4f';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y - b.size/2 - 4, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillRect(b.x - 3, b.y - b.size/2 - 6, 2, 2);
+      ctx.fillRect(b.x + 1, b.y - b.size/2 - 6, 2, 2);
+    } else if (b.type === 'pyro') {
+      // 烈焰魔：橙红+火焰边缘
+      const flame = Math.sin(Date.now() / 100) * 3;
+      ctx.fillStyle = '#ff6020';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size/2 + flame, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd040';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size/2 - 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillRect(b.x - 7, b.y - 3, 4, 4);
+      ctx.fillRect(b.x + 3, b.y - 3, 4, 4);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(b.x - 5, b.y + 5, 10, 2);
+    } else if (b.type === 'wizard') {
+      // 紫袍 + 尖帽
+      ctx.fillStyle = '#4a1a6b';
+      ctx.fillRect(b.x - b.size/2, b.y - 4, b.size, b.size/2 + 8);
+      // 帽子
+      ctx.fillStyle = '#6b2a9b';
+      ctx.beginPath();
+      ctx.moveTo(b.x - b.size/2 + 2, b.y - 4);
+      ctx.lineTo(b.x, b.y - b.size/2 - 6);
+      ctx.lineTo(b.x + b.size/2 - 2, b.y - 4);
+      ctx.closePath(); ctx.fill();
+      // 帽尖星
+      ctx.fillStyle = '#ffe066';
+      ctx.fillRect(b.x - 2, b.y - b.size/2 - 8, 4, 4);
+      // 脸
+      ctx.fillStyle = '#e0c8a0';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 9, 0, Math.PI * 2);
+      ctx.fill();
+      // 眼睛
+      ctx.fillStyle = '#660033';
+      ctx.fillRect(b.x - 5, b.y - 2, 3, 3);
+      ctx.fillRect(b.x + 2, b.y - 2, 3, 3);
+      // 瞬移残影
+      if (b.teleportCd > 170) {
+        ctx.fillStyle = 'rgba(180,100,255,0.4)';
+        ctx.fillRect(b.x - b.size/2 - 3, b.y - b.size/2 - 3, b.size + 6, b.size + 6);
+      }
+    } else if (b.type === 'dragon') {
+      // 巨龙身体
+      ctx.fillStyle = '#2a6b3a';
+      ctx.beginPath();
+      ctx.ellipse(b.x, b.y, b.size/2, b.size/2 - 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 鳞片
+      ctx.fillStyle = '#4a9b5a';
+      for (let k = 0; k < 6; k++) {
+        const ang = k * Math.PI / 3;
+        ctx.beginPath();
+        ctx.arc(b.x + Math.cos(ang) * 12, b.y + Math.sin(ang) * 9, 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 头朝玩家
+      const headAng = Math.atan2(player.y - b.y, player.x - b.x);
+      const hx = b.x + Math.cos(headAng) * b.size/2;
+      const hy = b.y + Math.sin(headAng) * b.size/2;
+      ctx.fillStyle = '#1a4b2a';
+      ctx.beginPath();
+      ctx.arc(hx, hy, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ff3030';
+      ctx.fillRect(hx - 4, hy - 3, 3, 3);
+      ctx.fillRect(hx + 1, hy - 3, 3, 3);
+      // 翅膀
+      const wf = Math.sin(Date.now() / 150) * 4;
+      ctx.fillStyle = '#3a8b4a';
+      ctx.beginPath();
+      ctx.moveTo(b.x - b.size/2, b.y);
+      ctx.lineTo(b.x - b.size, b.y - 10 + wf);
+      ctx.lineTo(b.x - b.size/2 - 3, b.y + 8);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.size/2, b.y);
+      ctx.lineTo(b.x + b.size, b.y - 10 + wf);
+      ctx.lineTo(b.x + b.size/2 + 3, b.y + 8);
+      ctx.closePath(); ctx.fill();
+    }
+    // 冻结覆盖
+    if (b.frozen > 0) {
+      ctx.fillStyle = 'rgba(160,220,255,0.6)';
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size/2 + 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // 血条
+    const barW = b.size + 16;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(b.x - barW/2, b.y - b.size/2 - 18, barW, 6);
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(b.x - barW/2, b.y - b.size/2 - 18, barW * (b.hp / b.maxHp), 6);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(CODEX[b.type].name + ' ' + b.hp + '/' + b.maxHp, b.x, b.y - b.size/2 - 22);
+  }
+
+  // 远程弹（绿口水 / 红火球 / 紫暗影）
+  for (const p of projectiles) {
+    if (p.fire) {
+      ctx.fillStyle = '#ff7020';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffd040';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.shadow) {
+      ctx.fillStyle = '#6b2a9b';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#b366ff';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#7fff7f';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#2a9c2a';
+      ctx.stroke();
+    }
+  }
+
+  // 爆炸特效
+  for (const ex of explosions) {
+    const prog = 1 - ex.t / 25;
+    ctx.fillStyle = `rgba(255,${200 - prog*150},0,${1 - prog})`;
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, 60 * prog, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,0,${1 - prog})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(ex.x, ex.y, 60 * prog, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // 龙卷风
+  if (tornado.active > 0) {
+    const t = tornado.active;
+    for (let r = 20; r <= 90; r += 14) {
+      const ang = (t * 0.15 + r) % (Math.PI * 2);
+      ctx.strokeStyle = `rgba(220,240,255,${0.3 + (r/90) * 0.4})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, r, ang, ang + Math.PI * 1.5);
+      ctx.stroke();
+    }
+    ctx.lineWidth = 1;
+  }
+
+  // 火焰刃特效
+  for (const fb of fireBeams) {
+    const fadeIn = Math.min(1, (25 - fb.t) / 4);
+    const fadeOut = Math.min(1, fb.t / 6);
+    const alpha = Math.min(fadeIn, fadeOut);
+    ctx.save();
+    ctx.translate(fb.x, fb.y);
+    ctx.rotate(fb.ang);
+    ctx.fillStyle = `rgba(255,140,40,${alpha})`;
+    ctx.beginPath();
+    ctx.ellipse(70, 0, 70, 30, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(255,230,80,${alpha})`;
+    ctx.beginPath();
+    ctx.ellipse(60, 0, 50, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // 冰冻波特效
+  for (const fw of freezeWaves) {
+    const progress = 1 - fw.t / 20;
+    ctx.strokeStyle = `rgba(180,230,255,${1 - progress})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(fw.x, fw.y, 140 * progress, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // 玩家
+  const dashingNow = player.equippedSkill === 'dash' && player.skillActive > 0;
+  if (dashingNow) {
+    ctx.fillStyle = 'rgba(150,200,255,0.4)';
+    ctx.fillRect(player.x - player.size/2 - 6, player.y - player.size/2, player.size, player.size);
+    ctx.fillRect(player.x - player.size/2 - 12, player.y - player.size/2, player.size, player.size);
+  }
+  ctx.fillStyle = dashingNow ? '#7fbfff' : '#3498ff';
+  ctx.fillRect(player.x - player.size/2, player.y - player.size/2, player.size, player.size);
+  ctx.fillStyle = '#fff';
+  // 朝向眼睛
+  let ex1 = player.x - 5, ey1 = player.y - 4, ex2 = player.x + 2, ey2 = player.y - 4;
+  if (player.dir === 'down') { ey1 += 6; ey2 += 6; }
+  if (player.dir === 'left') { ex1 -= 3; ex2 -= 3; }
+  if (player.dir === 'right') { ex1 += 3; ex2 += 3; }
+  ctx.fillRect(ex1, ey1, 3, 3);
+  ctx.fillRect(ex2, ey2, 3, 3);
+
+  // 攻击 360°剑气特效
+  if (player.attacking > 0) {
+    const progress = 1 - player.attacking / 16;
+    const radius = 20 + progress * 40;
+    ctx.strokeStyle = `rgba(255,255,255,${1 - progress})`;
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(180,220,255,${1 - progress})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, radius + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // 旋风斩特效
+  if (player.equippedSkill === 'whirl' && player.skillActive > 0) {
+    const t = player.skillActive;
+    for (let k = 0; k < 3; k++) {
+      const ang = (t * 0.3 + k * Math.PI * 2 / 3) % (Math.PI * 2);
+      ctx.strokeStyle = `rgba(180,230,255,${0.7})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, 110, ang, ang + 0.9);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 110, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  }
+
+  // 落石下落动画 / 闪电链
+  for (const r of rockStrikes) {
+    if (r.bolt) {
+      // 闪电链：从 bolt.fromX/Y 到 r.x/y 画曲折闪电
+      ctx.strokeStyle = `rgba(255,255,180,${r.t / 6})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(r.bolt.fromX, r.bolt.fromY);
+      const segs = 4;
+      for (let s = 1; s <= segs; s++) {
+        const tt = s / segs;
+        const px = r.bolt.fromX + (r.x - r.bolt.fromX) * tt + (Math.random() - 0.5) * 14;
+        const py = r.bolt.fromY + (r.y - r.bolt.fromY) * tt + (Math.random() - 0.5) * 14;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      continue;
+    }
+    if (r.t > 5) {
+      // 还在下落
+      const fallProgress = (30 - r.t) / 25;
+      const yOffset = -120 * (1 - fallProgress);
+      ctx.fillStyle = '#666';
+      ctx.beginPath();
+      ctx.arc(r.x, r.y + yOffset, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      // 影子
+      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      ctx.beginPath();
+      ctx.ellipse(r.x, r.y, 16, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 砸地特效
+      ctx.fillStyle = `rgba(255,200,100,${r.t / 5})`;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 60 * (1 - r.t / 5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 商店 UI (两列 10 技能, 居中面板)
+  if (gameState === 'shop') {
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, W, H);
+    const panelW = Math.min(W - 40, 760);
+    const panelH = Math.min(H - 40, 560);
+    const px = (W - panelW) / 2, py = (H - panelH) / 2;
+    ctx.fillStyle = '#f4e4bc';
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = '#8b5a2b';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(px, py, panelW, panelH);
+    ctx.lineWidth = 1;
+
+    ctx.fillStyle = '#4a2c14';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('🏪 技能商店', W/2, py + 32);
+    ctx.font = '13px sans-serif';
+    ctx.fillText(`💰 ${player.coin}　·　按 1-9 / 0 购买切换　·　B 离开`, W/2, py + 52);
+
+    ctx.textAlign = 'left';
+    const cardW = (panelW - 30) / 2;
+    const cardH = (panelH - 75) / 5 - 4;
+    for (let i = 0; i < SKILL_ORDER.length; i++) {
+      const id = SKILL_ORDER[i];
+      const sk = SKILLS[id];
+      const owned = player.ownedSkills.includes(id);
+      const equipped = player.equippedSkill === id;
+      const col = i % 2, row = Math.floor(i / 2);
+      const x = px + 10 + col * (cardW + 5);
+      const y = py + 65 + row * (cardH + 4);
+      ctx.fillStyle = equipped ? '#cfe7c0' : (owned ? '#fff' : '#fefbe5');
+      ctx.fillRect(x, y, cardW, cardH);
+      ctx.strokeStyle = equipped ? '#3a8c2c' : '#aaa';
+      ctx.strokeRect(x, y, cardW, cardH);
+
+      ctx.fillStyle = '#222';
+      ctx.font = 'bold 15px sans-serif';
+      const keyLabel = i === 9 ? '0' : String(i + 1);
+      ctx.fillText(`[${keyLabel}]  ${sk.name}`, x + 10, y + 22);
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#555';
+      ctx.fillText(sk.desc, x + 10, y + 42);
+
+      ctx.font = 'bold 13px sans-serif';
+      if (equipped) { ctx.fillStyle = '#3a8c2c'; ctx.fillText('✓ 装备中', x + 10, y + 62); }
+      else if (owned) { ctx.fillStyle = '#3478c8'; ctx.fillText('已拥有 · 按键装备', x + 10, y + 62); }
+      else {
+        ctx.fillStyle = player.coin >= sk.price ? '#c08000' : '#999';
+        ctx.fillText(`💰 ${sk.price}  按 ${keyLabel} 购买`, x + 10, y + 62);
+      }
+    }
+  }
+
+  // 怪物图鉴 UI (居中面板)
+  if (gameState === 'codex') {
+    ctx.fillStyle = 'rgba(0,0,0,0.78)';
+    ctx.fillRect(0, 0, W, H);
+    const panelW = Math.min(W - 40, 760);
+    const panelH = Math.min(H - 40, 560);
+    const px = (W - panelW) / 2, py = (H - panelH) / 2;
+    ctx.fillStyle = '#e6f0ff';
+    ctx.fillRect(px, py, panelW, panelH);
+    ctx.strokeStyle = '#2a4d8b';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(px, py, panelW, panelH);
+    ctx.lineWidth = 1;
+
+    ctx.fillStyle = '#1a2d5b';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('📖 怪物图鉴', W/2, py + 32);
+    ctx.font = '13px sans-serif';
+    ctx.fillText('按 T 关闭', W/2, py + 52);
+
+    ctx.textAlign = 'left';
+    const entries = Object.entries(CODEX);
+    const entryH = (panelH - 75) / entries.length - 2;
+    for (let i = 0; i < entries.length; i++) {
+      const [key, info] = entries[i];
+      const y = py + 65 + i * (entryH + 2);
+      const isBoss = ['bat', 'turtle', 'pyro', 'wizard', 'dragon'].includes(key);
+      ctx.fillStyle = isBoss ? '#fff0e8' : '#fff';
+      ctx.fillRect(px + 12, y, panelW - 24, entryH);
+      ctx.strokeStyle = isBoss ? '#cc6633' : '#a0b8d8';
+      ctx.strokeRect(px + 12, y, panelW - 24, entryH);
+
+      ctx.fillStyle = '#222';
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(info.name, px + 22, y + 18);
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#555';
+      ctx.fillText(info.desc, px + 22, y + entryH - 8);
+
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = isBoss ? '#cc4400' : '#3a7a3a';
+      ctx.textAlign = 'right';
+      ctx.fillText('弱点：' + info.weakness, px + panelW - 22, y + entryH / 2 + 4);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // 暂停画面
+  if (gameState === 'paused') {
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 56px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('⏸️ 暂停', W/2, H/2);
+    ctx.font = '20px sans-serif';
+    ctx.fillText('按 P 继续', W/2, H/2 + 40);
+  }
+
+  // 死亡画面
+  if (player.hp <= 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#fff';
+    ctx.font = '40px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('你倒下了... 按 R 复活', W/2, H/2);
+    ctx.font = '16px sans-serif';
+    ctx.fillText(`金币 ${player.coin}　|　击败 Boss 数：${bossesTriggered - bosses.length}`, W/2, H/2 + 30);
+  }
+}
+
+addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'r' && player.hp <= 0) {
+    player.hp = player.maxHp; player.x = W/2; player.y = H/2;
+    enemies.length = 0;
+    projectiles.length = 0;
+    rockStrikes.length = 0;
+    bosses.length = 0;
+    fireBeams.length = 0;
+    freezeWaves.length = 0;
+    explosions.length = 0;
+    tornado.active = 0;
+    for (let i = 0; i < 5; i++) spawnEnemy();
+  }
+});
+
+function loop() {
+  if (player.hp > 0) update();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

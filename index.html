@@ -2,13 +2,48 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>小人大作战</title>
 <style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #2b2b2b; font-family: -apple-system, sans-serif; color: #fff; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #2b2b2b; font-family: -apple-system, sans-serif; color: #fff; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; touch-action: none; }
   canvas { display: block; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #4a7c4a; image-rendering: pixelated; }
-  .title-bar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); font-size: 20px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.7); z-index: 10; pointer-events: none; }
-  #hud { position: fixed; top: 8px; left: 12px; font-size: 18px; background: rgba(0,0,0,0.45); padding: 6px 14px; border-radius: 8px; z-index: 10; pointer-events: none; }
-  .hint { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); color: #ddd; font-size: 13px; background: rgba(0,0,0,0.4); padding: 4px 12px; border-radius: 6px; z-index: 10; pointer-events: none; white-space: nowrap; }
+  .title-bar { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); font-size: 18px; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.7); z-index: 10; pointer-events: none; }
+  #hud { position: fixed; top: 8px; left: 12px; font-size: 16px; background: rgba(0,0,0,0.45); padding: 5px 12px; border-radius: 8px; z-index: 10; pointer-events: none; max-width: calc(100vw - 24px); line-height: 1.4; }
+  .hint { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); color: #ddd; font-size: 12px; background: rgba(0,0,0,0.4); padding: 4px 12px; border-radius: 6px; z-index: 10; pointer-events: none; white-space: nowrap; max-width: 96vw; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 触屏 UI：默认隐藏，触屏设备才显示 */
+  .touch-ui { display: none; }
+  @media (pointer: coarse), (max-width: 820px) {
+    .hint { display: none; }
+    .touch-ui { display: block; }
+    #hud { font-size: 13px; padding: 4px 8px; }
+    .title-bar { font-size: 14px; top: 6px; }
+  }
+
+  /* 摇杆 */
+  #joy { position: fixed; left: 24px; bottom: 28px; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,255,255,0.12); border: 3px solid rgba(255,255,255,0.4); z-index: 20; touch-action: none; }
+  #joyKnob { position: absolute; top: 50%; left: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: rgba(255,255,255,0.5); border: 3px solid rgba(255,255,255,0.85); transition: transform 0.04s; pointer-events: none; }
+
+  /* 主行动按钮 */
+  .btn-grid { position: fixed; right: 18px; bottom: 28px; display: grid; grid-template-columns: 80px 80px; grid-template-rows: 80px 80px; gap: 8px; z-index: 20; }
+  .btn { border-radius: 50%; background: rgba(255,255,255,0.18); border: 3px solid rgba(255,255,255,0.5); color: #fff; font-size: 13px; font-weight: bold; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; touch-action: none; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .btn:active, .btn.pressed { background: rgba(255,255,255,0.45); transform: scale(0.93); }
+  .btn .emoji { font-size: 22px; }
+  .btn-atk { background: rgba(255,80,80,0.45); border-color: rgba(255,180,180,0.9); }
+  .btn-skill { background: rgba(100,180,255,0.45); border-color: rgba(180,220,255,0.9); }
+  .btn-item { background: rgba(255,200,80,0.45); border-color: rgba(255,230,160,0.9); }
+  .btn-pause { background: rgba(180,180,180,0.45); border-color: rgba(220,220,220,0.9); }
+
+  /* 顶部右侧的辅助按钮（商店/图鉴） */
+  .top-btns { position: fixed; top: 8px; right: 10px; display: flex; gap: 6px; z-index: 20; }
+  .top-btn { padding: 6px 10px; border-radius: 8px; background: rgba(0,0,0,0.55); border: 2px solid rgba(255,255,255,0.4); color: #fff; font-size: 14px; font-weight: bold; cursor: pointer; touch-action: none; }
+  .top-btn:active { background: rgba(255,255,255,0.3); }
+
+  /* 在商店/图鉴/暂停时隐藏摇杆和动作按钮（让出空间给面板和点击） */
+  body.in-menu #joy, body.in-menu .btn-grid { display: none !important; }
 </style>
 </head>
 <body>
@@ -17,13 +52,34 @@
   <div class="hint">方向键/WASD 移动 · 空格 挥剑 · E 用技能 · Q 用道具 · B 商店 · T 图鉴 · P 暂停</div>
   <canvas id="game"></canvas>
 
+  <!-- 触屏控制（手机/平板） -->
+  <div class="touch-ui top-btns">
+    <button class="top-btn" data-key="b">🏪 商店</button>
+    <button class="top-btn" data-key="t">📖 图鉴</button>
+    <button class="top-btn" data-key="p">⏸️</button>
+  </div>
+  <div class="touch-ui" id="joy"><div id="joyKnob"></div></div>
+  <div class="touch-ui btn-grid">
+    <button class="btn btn-item" data-key="q"><span class="emoji">🪨</span><span>道具 Q</span></button>
+    <button class="btn btn-skill" data-key="e"><span class="emoji">✨</span><span>技能 E</span></button>
+    <button class="btn btn-pause" data-key="r"><span class="emoji">🔄</span><span>复活 R</span></button>
+    <button class="btn btn-atk" data-key=" "><span class="emoji">⚔️</span><span>挥剑</span></button>
+  </div>
+
 <script>
 const cv = document.getElementById('game');
 const ctx = cv.getContext('2d');
 let W = window.innerWidth;
 let H = window.innerHeight;
-cv.width = W;
-cv.height = H;
+let DPR = Math.min(window.devicePixelRatio || 1, 2);
+function applyCanvasSize() {
+  cv.width = W * DPR;
+  cv.height = H * DPR;
+  cv.style.width = W + 'px';
+  cv.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+applyCanvasSize();
 
 const player = { x: W/2, y: H/2, size: 24, baseSpeed: 3, speed: 3, hp: 5, maxHp: 5, coin: 0, totalCoin: 0, rock: 0, potion: 0, dir: 'down', attacking: 0, skillActive: 0, skillCD: 0, regenTick: 0, equippedSkill: 'dash', ownedSkills: ['dash'] };
 
@@ -98,8 +154,8 @@ seedDecorations();
 window.addEventListener('resize', () => {
   W = window.innerWidth;
   H = window.innerHeight;
-  cv.width = W;
-  cv.height = H;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  applyCanvasSize();
   player.x = Math.max(player.size, Math.min(W - player.size, player.x));
   player.y = Math.max(player.size, Math.min(H - player.size, player.y));
   seedDecorations();
@@ -1474,7 +1530,109 @@ addEventListener('keydown', e => {
   }
 });
 
+// === 触屏控制：摇杆 + 按钮 + 商店/图鉴卡片点击 ===
+const joyEl = document.getElementById('joy');
+const joyKnob = document.getElementById('joyKnob');
+const joy = { active: false, pointerId: null, baseX: 0, baseY: 0, dx: 0, dy: 0 };
+
+function setJoyKeys() {
+  // 摇杆方向归位：松手立刻清
+  if (!joy.active) {
+    keys['arrowright'] = keys['arrowleft'] = keys['arrowup'] = keys['arrowdown'] = false;
+    return;
+  }
+  const TH = 0.28;
+  keys['arrowright'] = joy.dx > TH;
+  keys['arrowleft']  = joy.dx < -TH;
+  keys['arrowdown']  = joy.dy > TH;
+  keys['arrowup']    = joy.dy < -TH;
+}
+joyEl.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  const r = joyEl.getBoundingClientRect();
+  joy.baseX = r.left + r.width / 2;
+  joy.baseY = r.top + r.height / 2;
+  joy.active = true;
+  joy.pointerId = e.pointerId;
+  joyEl.setPointerCapture(e.pointerId);
+});
+joyEl.addEventListener('pointermove', e => {
+  if (!joy.active || e.pointerId !== joy.pointerId) return;
+  const dx = e.clientX - joy.baseX;
+  const dy = e.clientY - joy.baseY;
+  const d = Math.hypot(dx, dy);
+  const MAX = 48;
+  const cdx = d > MAX ? dx * MAX / d : dx;
+  const cdy = d > MAX ? dy * MAX / d : dy;
+  joyKnob.style.transform = `translate(${cdx}px, ${cdy}px)`;
+  joy.dx = cdx / MAX;
+  joy.dy = cdy / MAX;
+  setJoyKeys();
+});
+function joyRelease() {
+  joy.active = false;
+  joy.pointerId = null;
+  joy.dx = joy.dy = 0;
+  joyKnob.style.transform = 'translate(0,0)';
+  setJoyKeys();
+}
+joyEl.addEventListener('pointerup', joyRelease);
+joyEl.addEventListener('pointercancel', joyRelease);
+joyEl.addEventListener('pointerleave', joyRelease);
+
+// 按钮：data-key 标记按下时设的 key
+document.querySelectorAll('[data-key]').forEach(btn => {
+  const k = btn.dataset.key;
+  const press = e => {
+    e.preventDefault();
+    keys[k] = true;
+    btn.classList.add('pressed');
+    // R 复活逻辑在 keydown 事件里，按钮需要派发合成事件
+    if (k === 'r') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
+  };
+  const release = e => { e.preventDefault(); keys[k] = false; btn.classList.remove('pressed'); };
+  btn.addEventListener('pointerdown', press);
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+  btn.addEventListener('pointerleave', e => { if (keys[k]) release(e); });
+});
+
+// 商店 / 图鉴的点击：根据点击位置触发 (data-key=b/t 已切换 state, 这里只处理 panel 里的卡片)
+cv.addEventListener('pointerdown', e => {
+  if (gameState !== 'shop' && gameState !== 'codex' && gameState !== 'paused') return;
+  const x = e.clientX, y = e.clientY;
+  if (gameState === 'shop') {
+    const panelW = Math.min(W - 40, 760);
+    const panelH = Math.min(H - 40, 560);
+    const px = (W - panelW) / 2, py = (H - panelH) / 2;
+    const cardW = (panelW - 30) / 2;
+    const cardH = (panelH - 75) / 5 - 4;
+    for (let i = 0; i < SKILL_ORDER.length; i++) {
+      const col = i % 2, row = Math.floor(i / 2);
+      const cx = px + 10 + col * (cardW + 5);
+      const cy = py + 65 + row * (cardH + 4);
+      if (x >= cx && x <= cx + cardW && y >= cy && y <= cy + cardH) {
+        const id = SKILL_ORDER[i];
+        const sk = SKILLS[id];
+        if (player.ownedSkills.includes(id)) {
+          player.equippedSkill = id;
+        } else if (player.coin >= sk.price) {
+          player.coin -= sk.price;
+          player.ownedSkills.push(id);
+          player.equippedSkill = id;
+        }
+        return;
+      }
+    }
+  }
+});
+
+// 阻止 iOS 双击放大
+document.addEventListener('gesturestart', e => e.preventDefault());
+document.addEventListener('dblclick', e => e.preventDefault());
+
 function loop() {
+  document.body.classList.toggle('in-menu', gameState === 'shop' || gameState === 'codex' || gameState === 'paused');
   if (player.hp > 0) update();
   draw();
   requestAnimationFrame(loop);

@@ -439,6 +439,19 @@ function spawnEnemy() {
   }
   enemies.push(e);
 }
+
+// === 体验服 (DEV MODE) ===
+// 链接里带 ?dev 或 #dev 即开启：金币 99999、全地图解锁、全技能拥有、最大血量翻倍
+const DEV_MODE = /[?#&]dev(=|$|&)/i.test(location.search + location.hash);
+if (DEV_MODE) {
+  player.coin = 99999;
+  player.maxHp = 12;
+  player.hp = 12;
+  player.unlockedMaps = MAP_ORDER.slice();
+  player.ownedSkills = SKILL_ORDER.slice();
+  document.querySelector('.title-bar').innerHTML += ' <span style="color:#ffe066;font-size:13px;font-weight:bold;background:rgba(180,40,40,0.7);padding:2px 8px;border-radius:8px;margin-left:6px;">🛠️ 体验服</span>';
+}
+
 for (let i = 0; i < INIT_SPAWN; i++) spawnEnemy();
 
 const keys = {};

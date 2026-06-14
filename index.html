@@ -266,20 +266,30 @@ const fireBeams = []; // 火焰刃特效 {x,y,dir,t}
 const freezeWaves = []; // 冰冻波特效 {x,y,t}
 const tornado = { active: 0, cd: 0, x: 0, y: 0 }; // 龙卷风跟随玩家
 const explosions = []; // 自爆球爆炸 {x,y,t}
+const wolves = [];     // 召唤的狼群 {x, y, vx, vy, life, atkCd}
+const iceWalls = [];   // 冰墙 {x, y, size, life}
+const tsunamis = [];   // 海啸 {x, life, speed}
+let sandstormTime = 0; // 沙尘暴生效帧数
 
 const SKILLS = {
-  dash:    { name: '💨 冲刺',     desc: '按E 0.5秒加速2.2倍，CD 3秒',       price: 0,   active: true  },
-  whirl:   { name: '🌀 旋风斩',   desc: '按E 1秒大范围旋风，CD 6秒',        price: 25,  active: true  },
-  bolt:    { name: '⚡ 闪电链',   desc: '被动：挥剑命中自动劈最近的怪',      price: 40,  active: false },
-  shield:  { name: '🛡️ 护盾',     desc: '被动：50%概率挡掉伤害',            price: 60,  active: false },
-  fire:    { name: '🔥 火焰刃',   desc: '按E朝面前喷火，伤害3，CD 4秒',     price: 35,  active: true  },
-  freeze:  { name: '❄️ 冰冻波',   desc: '按E冻住附近怪1.5秒，CD 7秒',       price: 45,  active: true  },
-  regen:   { name: '🌱 回春',     desc: '被动：每5秒自动回1血',             price: 50,  active: false },
-  wind:    { name: '👟 疾风',     desc: '被动：移动速度永久+40%',           price: 40,  active: false },
-  tornado: { name: '🌪️ 龙卷风',   desc: '按E召唤跟随的龙卷风3秒，吸怪伤害',  price: 70,  active: true  },
-  vamp:    { name: '🩸 吸血',     desc: '被动：挥剑命中50%概率回1血',        price: 55,  active: false },
+  dash:      { name: '💨 冲刺',     desc: '按E 0.5秒加速2.2倍，CD 3秒',           price: 0,   active: true  },
+  whirl:     { name: '🌀 旋风斩',   desc: '按E 1秒大范围旋风，CD 6秒',            price: 25,  active: true  },
+  bolt:      { name: '⚡ 闪电链',   desc: '被动：挥剑命中自动劈最近的怪',          price: 40,  active: false },
+  shield:    { name: '🛡️ 护盾',     desc: '被动：50%概率挡掉伤害',                price: 60,  active: false },
+  fire:      { name: '🔥 火焰刃',   desc: '按E朝面前喷火，伤害3，CD 4秒',         price: 35,  active: true  },
+  freeze:    { name: '❄️ 冰冻波',   desc: '按E冻住附近怪1.5秒，CD 7秒',           price: 45,  active: true  },
+  regen:     { name: '🌱 回春',     desc: '被动：每5秒自动回1血',                 price: 50,  active: false },
+  wind:      { name: '👟 疾风',     desc: '被动：移动速度永久+40%',               price: 40,  active: false },
+  tornado:   { name: '🌪️ 龙卷风',   desc: '按E召唤跟随的龙卷风3秒，吸怪伤害',      price: 70,  active: true  },
+  vamp:      { name: '🩸 吸血',     desc: '被动：挥剑命中50%概率回1血',            price: 55,  active: false },
+  sandstorm: { name: '🌪 沙尘暴',   desc: '【沙漠】按E 6秒沙尘，敌人速度减半',     price: 80,  active: true  },
+  iceWall:   { name: '🧊 冰墙',     desc: '【冰河】按E上下左右生成冰墙挡敌4秒',     price: 70,  active: true  },
+  wolfPack:  { name: '🐺 狼群召唤', desc: '【动物世界】按E召3只狼跟随10秒自动攻击', price: 100, active: true  },
+  tsunami:   { name: '🌊 海啸',     desc: '【海洋】按E一道水墙横扫，全屏-5HP击退', price: 120, active: true  },
+  eruption:  { name: '🌋 火山喷发', desc: '【火山】按E周围8方向喷火球',            price: 90,  active: true  },
 };
-const SKILL_ORDER = ['dash', 'whirl', 'bolt', 'shield', 'fire', 'freeze', 'regen', 'wind', 'tornado', 'vamp'];
+const SKILL_ORDER = ['dash', 'whirl', 'bolt', 'shield', 'fire', 'freeze', 'regen', 'wind', 'tornado', 'vamp',
+                     'sandstorm', 'iceWall', 'wolfPack', 'tsunami', 'eruption'];
 
 // 怪物图鉴 / Boss 弱点
 const CODEX = {
@@ -288,6 +298,11 @@ const CODEX = {
   yellow: { name: '🔺 黄三角',        desc: '会突然冲刺，HP 1 超脆',               weakness: '冰冻秒杀' },
   bird:   { name: '🪶 暗影鸟',        desc: '高速直线飞，撞到扣血。HP 1',          weakness: '范围技能' },
   bomber: { name: '💣 自爆球',        desc: '靠近后1秒倒数爆炸。HP 1',             weakness: '远距离击杀' },
+  sandScorpion: { name: '🦂 沙蝎',     desc: '【沙漠】间歇潜伏后突袭。HP 1',         weakness: '潜伏时无法被打' },
+  iceSlider:    { name: '🐧 冰滑兽',   desc: '【冰河】直线滑动撞墙反弹。HP 3',       weakness: '预判轨迹' },
+  snake:        { name: '🐍 蛇',       desc: '【动物世界】S 形蜿蜒贴近。HP 2',       weakness: '冰冻定住' },
+  octopus:      { name: '🦑 章鱼',     desc: '【海洋】三连墨汁弹幕。HP 3',           weakness: '近身刚正面' },
+  fireSpirit:   { name: '🔥 火灵',     desc: '【火山】飞行直冲。HP 1',               weakness: '冰冻' },
   bat:    { name: '🦇 暗影蝙蝠 BOSS', desc: '高速突进 + 8方向声波。HP 28',         weakness: '🌀 旋风斩 ×3' },
   turtle: { name: '🐢 铁壳龟 BOSS',   desc: '会突然旋转冲撞，普通伤害减半。HP 42', weakness: '🪨 落石 ×3' },
   pyro:   { name: '🔥 烈焰魔 BOSS',   desc: '五连火球 + 12 颗圆周火球。HP 34',     weakness: '❄️ 冰冻时 ×3' },
@@ -295,16 +310,26 @@ const CODEX = {
   dragon: { name: '🐉 巨龙 BOSS',     desc: '扇形火焰 + 高速冲撞。HP 56',          weakness: '⚡ 闪电链 ×3' },
 };
 
-// 地图定义：每张图有专属背景色、装饰主题、怪池
+// 地图定义：每张图有专属背景色、装饰主题、怪池、专属技能
 const MAPS = {
-  forest:  { name: '🌳 森林',     price: 0,   bgTop: '#5e9a4d', bgBot: '#3f7338', dust: '#3a6a3a', path: 'rgba(180,140,90,0.35)', enemyTypes: ['red','green','yellow','bird','bomber'], decorTheme: 'forest',  desc: '默认家园。所有怪物都会出现。' },
-  desert:  { name: '🏜️ 沙漠',     price: 150, bgTop: '#e3b878', bgBot: '#8a6035', dust: '#a67843', path: 'rgba(120,80,40,0.3)',   enemyTypes: ['yellow','red','bird'],                  decorTheme: 'desert',  desc: '黄沙烈日，黄三角与红怪盘踞。' },
-  ice:     { name: '❄️ 冰河',     price: 300, bgTop: '#d0e6f2', bgBot: '#7aa0bc', dust: '#a0c0d8', path: 'rgba(220,235,245,0.5)', enemyTypes: ['green','bomber','red'],                 decorTheme: 'ice',     desc: '冰天雪地，绿怪和自爆冰球出没。' },
-  animal:  { name: '🦁 动物世界', price: 400, bgTop: '#b4cf78', bgBot: '#6b8a3a', dust: '#5a7a2a', path: 'rgba(180,140,90,0.4)',  enemyTypes: ['red','yellow','bird'],                  decorTheme: 'animal',  desc: '广阔草原，狮子、猎豹与飞鸟交错出没。' },
-  ocean:   { name: '🌊 海洋',     price: 500, bgTop: '#4a9ed8', bgBot: '#1d4f80', dust: '#3a7fb0', path: 'rgba(220,255,255,0.2)', enemyTypes: ['green','bird','yellow'],                decorTheme: 'ocean',   desc: '深蓝海域，绿怪和飞鱼环绕珊瑚。' },
-  volcano: { name: '🌋 火山',     price: 800, bgTop: '#7a2828', bgBot: '#1a0808', dust: '#3a1010', path: 'rgba(220,80,30,0.45)',  enemyTypes: ['red','bomber','yellow'],                decorTheme: 'volcano', desc: '熔岩流淌，红怪、自爆球和黄三角横行。' },
+  forest:  { name: '🌳 森林',     price: 0,   bgTop: '#5e9a4d', bgBot: '#3f7338', dust: '#3a6a3a', path: 'rgba(180,140,90,0.35)', enemyTypes: ['red','green','yellow','bird','bomber'],    decorTheme: 'forest',  desc: '默认家园。所有怪物都会出现。' },
+  desert:  { name: '🏜️ 沙漠',     price: 150, bgTop: '#e3b878', bgBot: '#8a6035', dust: '#a67843', path: 'rgba(120,80,40,0.3)',   enemyTypes: ['yellow','red','bird','sandScorpion'],     decorTheme: 'desert',  desc: '黄沙烈日，沙蝎潜伏其中。商店出售🌪️沙尘暴。' },
+  ice:     { name: '❄️ 冰河',     price: 300, bgTop: '#d0e6f2', bgBot: '#7aa0bc', dust: '#a0c0d8', path: 'rgba(220,235,245,0.5)', enemyTypes: ['green','bomber','red','iceSlider'],       decorTheme: 'ice',     desc: '冰天雪地，冰滑兽横冲直撞。商店出售🧊冰墙。' },
+  animal:  { name: '🦁 动物世界', price: 400, bgTop: '#b4cf78', bgBot: '#6b8a3a', dust: '#5a7a2a', path: 'rgba(180,140,90,0.4)',  enemyTypes: ['red','yellow','bird','snake'],            decorTheme: 'animal',  desc: '草原沙沙作响，毒蛇蜿蜒袭来。商店出售🐺狼群召唤。' },
+  ocean:   { name: '🌊 海洋',     price: 500, bgTop: '#4a9ed8', bgBot: '#1d4f80', dust: '#3a7fb0', path: 'rgba(220,255,255,0.2)', enemyTypes: ['green','bird','yellow','octopus'],        decorTheme: 'ocean',   desc: '深蓝海域，章鱼喷射墨汁。商店出售🌊海啸。' },
+  volcano: { name: '🌋 火山',     price: 800, bgTop: '#7a2828', bgBot: '#1a0808', dust: '#3a1010', path: 'rgba(220,80,30,0.45)',  enemyTypes: ['red','bomber','yellow','fireSpirit'],     decorTheme: 'volcano', desc: '熔岩流淌，火灵游荡。商店出售🌋火山喷发。' },
 };
 const MAP_ORDER = ['forest', 'desert', 'ice', 'animal', 'ocean', 'volcano'];
+
+// 每张地图独有的技能 id（玩家在该地图进入商店时才能购买/装备）
+const MAP_SKILLS = {
+  forest: [], desert: ['sandstorm'], ice: ['iceWall'], animal: ['wolfPack'], ocean: ['tsunami'], volcano: ['eruption'],
+};
+const MAP_SKILL_SET = new Set(['sandstorm','iceWall','wolfPack','tsunami','eruption']);
+function getVisibleSkillOrder() {
+  const allowed = new Set([...MAP_SKILLS[player.currentMap]]);
+  return SKILL_ORDER.filter(id => !MAP_SKILL_SET.has(id) || allowed.has(id));
+}
 
 // 商店建筑（左上角）
 const shop = { x: 70, y: 70, w: 70, h: 60 };
@@ -392,14 +417,25 @@ function spawnEnemy() {
   } else if (type === 'yellow') {
     e = { type, x, y, size: 18, hp: 1, speed: 1.5 * ENEMY_SPEED_MUL, cd: 90 + Math.random() * 60, dashing: 0 };
   } else if (type === 'bird') {
-    // 暗影鸟：固定方向飞行
     const tx = player.x, ty = player.y;
     const a = Math.atan2(ty - y, tx - x);
     const sp = 3.4 * ENEMY_SPEED_MUL;
     e = { type, x, y, size: 18, hp: 1, speed: sp, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp };
-  } else {
-    // 自爆球
+  } else if (type === 'bomber') {
     e = { type, x, y, size: 20, hp: 1, speed: 0.9 * ENEMY_SPEED_MUL, fuse: -1 };
+  } else if (type === 'sandScorpion') {
+    e = { type, x, y, size: 22, hp: 1, speed: 1.4 * ENEMY_SPEED_MUL, cd: 90, stealth: 0 };
+  } else if (type === 'iceSlider') {
+    const tx = player.x, ty = player.y;
+    const a = Math.atan2(ty - y, tx - x);
+    const sp = 1.7 * ENEMY_SPEED_MUL;
+    e = { type, x, y, size: 24, hp: 3, speed: sp, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp };
+  } else if (type === 'snake') {
+    e = { type, x, y, size: 18, hp: 2, speed: 0.9 * ENEMY_SPEED_MUL, phase: Math.random() * 10 };
+  } else if (type === 'octopus') {
+    e = { type, x, y, size: 28, hp: 3, speed: 0.4 * ENEMY_SPEED_MUL, cd: 70 + Math.random() * 40 };
+  } else if (type === 'fireSpirit') {
+    e = { type, x, y, size: 18, hp: 1, speed: 2.0 * ENEMY_SPEED_MUL };
   }
   enemies.push(e);
 }
@@ -443,6 +479,10 @@ function switchToMap(mapId) {
   fireBeams.length = 0;
   freezeWaves.length = 0;
   explosions.length = 0;
+  wolves.length = 0;
+  iceWalls.length = 0;
+  tsunamis.length = 0;
+  sandstormTime = 0;
   player.x = W / 2; player.y = H / 2;
   seedDecorations();
   for (let i = 0; i < INIT_SPAWN; i++) spawnEnemy();
@@ -492,11 +532,12 @@ function update() {
 
   // 商店内：1-9 / 0 数字键购买/切换技能
   if (gameState === 'shop') {
-    for (let i = 0; i < SKILL_ORDER.length; i++) {
+    const visible = getVisibleSkillOrder();
+    for (let i = 0; i < visible.length; i++) {
       const key = i === 9 ? '0' : String(i + 1);
       if (keys[key] && !player[`num${i}Locked`]) {
         player[`num${i}Locked`] = true;
-        const id = SKILL_ORDER[i];
+        const id = visible[i];
         const sk = SKILLS[id];
         if (player.ownedSkills.includes(id)) {
           player.equippedSkill = id;
@@ -539,6 +580,41 @@ function update() {
     if (equipped === 'tornado') {
       player.skillActive = 180; player.skillCD = 540; fired = true;
       tornado.active = 180;
+    }
+    if (equipped === 'sandstorm') {
+      player.skillActive = 360; player.skillCD = 600; fired = true;
+      sandstormTime = 360;
+    }
+    if (equipped === 'iceWall') {
+      player.skillActive = 240; player.skillCD = 480; fired = true;
+      const D = 60;
+      iceWalls.push({ x: player.x, y: player.y - D, size: 28, life: 240 });
+      iceWalls.push({ x: player.x, y: player.y + D, size: 28, life: 240 });
+      iceWalls.push({ x: player.x - D, y: player.y, size: 28, life: 240 });
+      iceWalls.push({ x: player.x + D, y: player.y, size: 28, life: 240 });
+    }
+    if (equipped === 'wolfPack') {
+      player.skillActive = 600; player.skillCD = 720; fired = true;
+      for (let k = 0; k < 3; k++) {
+        const ang = (k / 3) * Math.PI * 2;
+        wolves.push({
+          x: player.x + Math.cos(ang) * 40,
+          y: player.y + Math.sin(ang) * 40,
+          life: 600, atkCd: 0, offsetAng: ang
+        });
+      }
+    }
+    if (equipped === 'tsunami') {
+      player.skillActive = 60; player.skillCD = 600; fired = true;
+      tsunamis.push({ x: -60, life: 90 });
+    }
+    if (equipped === 'eruption') {
+      player.skillActive = 24; player.skillCD = 480; fired = true;
+      for (let k = 0; k < 8; k++) {
+        const ang = (k / 8) * Math.PI * 2;
+        const sp = 4.0;
+        projectiles.push({ x: player.x, y: player.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: 80, fire: true, friendly: true });
+      }
     }
     if (fired) SFX.skill();
   }
@@ -666,6 +742,51 @@ function update() {
           continue;
         }
       }
+    } else if (e.type === 'sandScorpion') {
+      // 沙蝎：间歇潜伏 + 快速冲刺
+      e.cd--;
+      if (e.cd <= 0 && e.stealth <= 0) { e.stealth = 30; e.cd = 100; }
+      if (e.stealth > 0) e.stealth--;
+      else {
+        const mul = sandstormTime > 0 ? 0.5 : 1;
+        e.x += (ex / dist) * e.speed * mul;
+        e.y += (ey / dist) * e.speed * mul;
+      }
+    } else if (e.type === 'iceSlider') {
+      // 冰滑兽：直线滑动 + 撞墙反弹
+      const mul = sandstormTime > 0 ? 0.5 : 1;
+      e.x += e.vx * mul;
+      e.y += e.vy * mul;
+      if (e.x < 20 || e.x > W - 20) e.vx = -e.vx;
+      if (e.y < 90 || e.y > H - 20) e.vy = -e.vy;
+    } else if (e.type === 'snake') {
+      // 蛇：S 形蜿蜒朝玩家
+      e.phase += 0.10;
+      const perpX = -ey / dist, perpY = ex / dist;
+      const sway = Math.sin(e.phase) * 1.4;
+      const mul = sandstormTime > 0 ? 0.5 : 1;
+      e.x += ((ex / dist) * e.speed + perpX * sway) * mul;
+      e.y += ((ey / dist) * e.speed + perpY * sway) * mul;
+    } else if (e.type === 'octopus') {
+      // 章鱼：慢速逼近 + 周期三连墨汁
+      const mul = sandstormTime > 0 ? 0.5 : 1;
+      e.x += (ex / dist) * e.speed * mul;
+      e.y += (ey / dist) * e.speed * mul;
+      e.cd--;
+      if (e.cd <= 0 && dist < 320) {
+        for (let k = -1; k <= 1; k++) {
+          const baseAng = Math.atan2(ey, ex);
+          const ang = baseAng + k * 0.2;
+          const sp = 2.0 * ENEMY_SPEED_MUL;
+          projectiles.push({ x: e.x, y: e.y, vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp, life: 110, ink: true });
+        }
+        e.cd = 80 + Math.random() * 40;
+      }
+    } else if (e.type === 'fireSpirit') {
+      // 火灵：飞行直冲
+      const mul = sandstormTime > 0 ? 0.5 : 1;
+      e.x += (ex / dist) * e.speed * mul;
+      e.y += (ey / dist) * e.speed * mul;
     }
 
     // 攻击命中（环形 360° + 旋风斩）
@@ -953,6 +1074,87 @@ function update() {
     }
   }
 
+  // === 沙尘暴持续 ===
+  if (sandstormTime > 0) sandstormTime--;
+
+  // === 冰墙挡敌 + 倒计时 ===
+  for (let i = iceWalls.length - 1; i >= 0; i--) {
+    const w = iceWalls[i];
+    w.life--;
+    // 敌人推开
+    for (const e of enemies) {
+      const d = Math.hypot(e.x - w.x, e.y - w.y);
+      if (d < (w.size + e.size) / 2 && d > 0) {
+        e.x += (e.x - w.x) / d * 3;
+        e.y += (e.y - w.y) / d * 3;
+      }
+    }
+    if (w.life <= 0) iceWalls.splice(i, 1);
+  }
+
+  // === 狼群跟随 + 自动攻击 ===
+  for (let i = wolves.length - 1; i >= 0; i--) {
+    const wo = wolves[i];
+    wo.life--;
+    // 跟随玩家（绕一圈）
+    wo.offsetAng += 0.02;
+    const tx = player.x + Math.cos(wo.offsetAng) * 50;
+    const ty = player.y + Math.sin(wo.offsetAng) * 50;
+    // 找最近敌人
+    let target = null, td = 9999;
+    for (const e of enemies) {
+      const d = Math.hypot(e.x - wo.x, e.y - wo.y);
+      if (d < td) { td = d; target = e; }
+    }
+    if (target && td < 120) {
+      // 追敌
+      const dx = target.x - wo.x, dy = target.y - wo.y;
+      const dl = Math.hypot(dx, dy) || 1;
+      wo.x += (dx / dl) * 3;
+      wo.y += (dy / dl) * 3;
+      wo.atkCd--;
+      if (wo.atkCd <= 0 && td < target.size / 2 + 12) {
+        target.hp--;
+        wo.atkCd = 30;
+        if (target.hp <= 0) {
+          const gold = Math.floor(Math.random() * 4);
+          for (let g = 0; g < gold; g++) coins.push({ x: target.x + (Math.random() - 0.5) * 16, y: target.y + (Math.random() - 0.5) * 16 });
+          if (Math.random() < 0.08) items.push({ x: target.x, y: target.y, type: Math.random() < 0.5 ? 'rock' : 'potion' });
+          const idx = enemies.indexOf(target);
+          if (idx >= 0) { enemies.splice(idx, 1); SFX.enemyDie(); setTimeout(refreshEnemies, 1500); }
+        }
+      }
+    } else {
+      // 跟随玩家
+      wo.x += (tx - wo.x) * 0.08;
+      wo.y += (ty - wo.y) * 0.08;
+    }
+    if (wo.life <= 0) wolves.splice(i, 1);
+  }
+
+  // === 海啸横扫 ===
+  for (let i = tsunamis.length - 1; i >= 0; i--) {
+    const t = tsunamis[i];
+    t.life--;
+    t.x += W / 50; // 整个海啸 ~50 帧穿过屏幕
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      const e = enemies[j];
+      if (Math.abs(e.x - t.x) < 60 && !e._tsunamiHit) {
+        e._tsunamiHit = t;
+        e.hp -= 5;
+        e.x += 30;
+        if (e.hp <= 0) {
+          const gold = Math.floor(Math.random() * 4);
+          for (let g = 0; g < gold; g++) coins.push({ x: e.x + (Math.random() - 0.5) * 16, y: e.y + (Math.random() - 0.5) * 16 });
+          if (Math.random() < 0.08) items.push({ x: e.x, y: e.y, type: Math.random() < 0.5 ? 'rock' : 'potion' });
+          enemies.splice(j, 1); SFX.enemyDie();
+          setTimeout(refreshEnemies, 1500);
+        }
+      }
+    }
+    if (t.life <= 0 || t.x > W + 80) tsunamis.splice(i, 1);
+  }
+
   // 爆炸特效倒数
   for (let i = explosions.length - 1; i >= 0; i--) {
     explosions[i].t--;
@@ -1052,19 +1254,40 @@ function update() {
     }
   }
 
-  // 口水弹更新
+  // 口水弹 / 友军火球更新
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
     p.x += p.vx;
     p.y += p.vy;
     p.life--;
-    // 命中玩家
-    if (Math.hypot(p.x - player.x, p.y - player.y) < player.size/2 + 6) {
-      if (!(equipped === 'shield' && Math.random() < 0.5)) {
-        player.hp = Math.max(0, player.hp - 1);
+    if (p.friendly) {
+      // 友军 projectile：打敌人，跳过玩家
+      let hit = false;
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        const e = enemies[j];
+        if (Math.hypot(p.x - e.x, p.y - e.y) < e.size / 2 + 6) {
+          e.hp -= 2;
+          hit = true;
+          if (e.hp <= 0) {
+            const gold = Math.floor(Math.random() * 4);
+            for (let g = 0; g < gold; g++) coins.push({ x: e.x + (Math.random() - 0.5) * 16, y: e.y + (Math.random() - 0.5) * 16 });
+            if (Math.random() < 0.08) items.push({ x: e.x, y: e.y, type: Math.random() < 0.5 ? 'rock' : 'potion' });
+            enemies.splice(j, 1); SFX.enemyDie();
+            setTimeout(refreshEnemies, 1500);
+          }
+          break;
+        }
       }
-      projectiles.splice(i, 1);
-      continue;
+      if (hit) { projectiles.splice(i, 1); continue; }
+    } else {
+      // 命中玩家
+      if (Math.hypot(p.x - player.x, p.y - player.y) < player.size/2 + 6) {
+        if (!(equipped === 'shield' && Math.random() < 0.5)) {
+          player.hp = Math.max(0, player.hp - 1);
+        }
+        projectiles.splice(i, 1);
+        continue;
+      }
     }
     if (p.life <= 0 || p.x < 0 || p.x > W || p.y < 0 || p.y > H) {
       projectiles.splice(i, 1);
@@ -1619,6 +1842,140 @@ function draw() {
         ctx.arc(e.x + 3, ey - e.size/2 - 8, 1.5, 0, Math.PI * 2);
         ctx.fill();
       }
+    } else if (e.type === 'sandScorpion') {
+      // 沙蝎：潜伏时半透明
+      const alpha = e.stealth > 0 ? 0.35 : 1;
+      ctx.globalAlpha = alpha;
+      // 身体
+      ctx.fillStyle = '#8b5a2b';
+      ctx.beginPath();
+      ctx.ellipse(e.x, ey, 10, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 钳子
+      ctx.fillStyle = '#6b4423';
+      ctx.beginPath();
+      ctx.arc(e.x - 9, ey - 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(e.x + 9, ey - 3, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // 翘起的尾巴
+      ctx.strokeStyle = '#3a1f10';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(e.x, ey + 3);
+      ctx.quadraticCurveTo(e.x + 7, ey + 6, e.x + 4, ey - 6);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      // 蜇针
+      ctx.fillStyle = '#ff3030';
+      ctx.fillRect(e.x + 3, ey - 8, 2, 3);
+      // 眼睛
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(e.x - 3, ey - 2, 1.5, 1.5);
+      ctx.fillRect(e.x + 1.5, ey - 2, 1.5, 1.5);
+      ctx.globalAlpha = 1;
+    } else if (e.type === 'iceSlider') {
+      // 白胖企鹅样
+      ctx.fillStyle = '#f0f8fc';
+      ctx.beginPath();
+      ctx.ellipse(e.x, ey, 11, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#7aa8c8';
+      ctx.beginPath();
+      ctx.arc(e.x - 4, ey + 1, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(e.x + 4, ey + 3, 2, 0, Math.PI * 2);
+      ctx.fill();
+      // 黑眼
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(e.x - 3, ey - 3, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.x + 3, ey - 3, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.fillRect(e.x - 3.5, ey - 4, 1.5, 1.5);
+      ctx.fillRect(e.x + 2, ey - 4, 1.5, 1.5);
+      // 橙嘴
+      ctx.fillStyle = '#ff8030';
+      ctx.beginPath();
+      ctx.moveTo(e.x, ey - 1);
+      ctx.lineTo(e.x + 4, ey + 1);
+      ctx.lineTo(e.x, ey + 2);
+      ctx.closePath(); ctx.fill();
+    } else if (e.type === 'snake') {
+      // 蛇：多节身体
+      ctx.fillStyle = '#3aaf3a';
+      for (let k = 4; k >= 0; k--) {
+        const offset = Math.sin(e.phase - k * 0.5) * 3;
+        ctx.beginPath();
+        ctx.arc(e.x - k * 4, ey + offset, 5 - k * 0.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // 头
+      ctx.fillStyle = '#5ac95a';
+      ctx.beginPath();
+      ctx.arc(e.x + 4, ey, 6, 0, Math.PI * 2);
+      ctx.fill();
+      // 眼睛
+      ctx.fillStyle = '#000';
+      ctx.fillRect(e.x + 5, ey - 3, 1.5, 1.5);
+      ctx.fillRect(e.x + 5, ey + 1, 1.5, 1.5);
+      // 红舌头
+      ctx.fillStyle = '#ff3030';
+      ctx.fillRect(e.x + 10, ey, 4, 1);
+      ctx.fillRect(e.x + 13, ey - 1, 1, 3);
+    } else if (e.type === 'octopus') {
+      // 8 条触角
+      ctx.strokeStyle = '#6a2a9f';
+      ctx.lineWidth = 2.5;
+      for (let k = 0; k < 8; k++) {
+        const ang = (k / 8) * Math.PI * 2;
+        const wave = Math.sin(Date.now() / 200 + k) * 2;
+        const len = 14;
+        ctx.beginPath();
+        ctx.moveTo(e.x + Math.cos(ang) * 8, ey + Math.sin(ang) * 6);
+        ctx.quadraticCurveTo(
+          e.x + Math.cos(ang) * (len + wave), ey + Math.sin(ang) * (len + wave),
+          e.x + Math.cos(ang) * (len + 4), ey + Math.sin(ang) * (len + 4) + 2
+        );
+        ctx.stroke();
+      }
+      ctx.lineWidth = 1;
+      // 紫色头
+      ctx.fillStyle = '#7a3aaf';
+      ctx.beginPath();
+      ctx.arc(e.x, ey - 2, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#9a5acf';
+      ctx.beginPath();
+      ctx.arc(e.x, ey - 4, 8, 0, Math.PI * 2);
+      ctx.fill();
+      // 大眼
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(e.x - 4, ey - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.x + 4, ey - 3, 3.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.arc(e.x - 4, ey - 3, 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e.x + 4, ey - 3, 1.8, 0, Math.PI * 2); ctx.fill();
+    } else if (e.type === 'fireSpirit') {
+      // 火焰球
+      const flare = Math.sin(Date.now() / 100) * 2;
+      ctx.fillStyle = '#ff5030';
+      ctx.beginPath();
+      ctx.arc(e.x, ey, 9 + flare, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffaa30';
+      ctx.beginPath();
+      ctx.arc(e.x, ey, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff060';
+      ctx.beginPath();
+      ctx.arc(e.x, ey - 1, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // 黑色小眼
+      ctx.fillStyle = '#000';
+      ctx.fillRect(e.x - 3, ey - 1, 1.5, 1.5);
+      ctx.fillRect(e.x + 1.5, ey - 1, 1.5, 1.5);
     }
     // 冻结覆盖
     if (e.frozen > 0) {
@@ -1787,9 +2144,18 @@ function draw() {
     ctx.fillText(CODEX[b.type].name + ' ' + b.hp + '/' + b.maxHp, b.x, b.y - b.size/2 - 22);
   }
 
-  // 远程弹（绿口水 / 红火球 / 紫暗影）
+  // 远程弹（绿口水 / 红火球 / 紫暗影 / 章鱼墨汁）
   for (const p of projectiles) {
-    if (p.fire) {
+    if (p.ink) {
+      ctx.fillStyle = '#1a0a2a';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#4a2a6a';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (p.fire) {
       ctx.fillStyle = '#ff7020';
       ctx.beginPath();
       ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
@@ -1874,6 +2240,86 @@ function draw() {
     ctx.arc(fw.x, fw.y, 140 * progress, 0, Math.PI * 2);
     ctx.stroke();
     ctx.lineWidth = 1;
+  }
+
+  // === 沙尘暴 ===
+  if (sandstormTime > 0) {
+    const alpha = Math.min(0.4, sandstormTime / 60 * 0.4);
+    ctx.fillStyle = `rgba(220,170,90,${alpha})`;
+    ctx.fillRect(0, 0, W, H);
+    // 横向沙粒
+    ctx.fillStyle = `rgba(255,220,140,0.7)`;
+    for (let k = 0; k < 60; k++) {
+      const sx = (k * 137 + Date.now() / 4) % W;
+      const sy = (k * 89) % H;
+      ctx.fillRect(sx, sy, 6, 1);
+    }
+  }
+
+  // === 冰墙 ===
+  for (const w of iceWalls) {
+    const a = Math.min(1, w.life / 40);
+    ctx.fillStyle = `rgba(160,220,255,${0.5 * a})`;
+    ctx.fillRect(w.x - w.size/2, w.y - w.size/2, w.size, w.size);
+    ctx.strokeStyle = `rgba(220,240,255,${a})`;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(w.x - w.size/2, w.y - w.size/2, w.size, w.size);
+    // 冰晶反光
+    ctx.fillStyle = `rgba(255,255,255,${0.7 * a})`;
+    ctx.fillRect(w.x - w.size/2 + 3, w.y - w.size/2 + 3, 4, 4);
+    ctx.lineWidth = 1;
+  }
+
+  // === 狼群 ===
+  for (const wo of wolves) {
+    // 影子
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(wo.x, wo.y + 6, 9, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 身体
+    ctx.fillStyle = '#5a5a6a';
+    ctx.beginPath();
+    ctx.ellipse(wo.x, wo.y, 9, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 头
+    ctx.fillStyle = '#6b6b7b';
+    ctx.beginPath();
+    ctx.arc(wo.x + 7, wo.y - 2, 5, 0, Math.PI * 2);
+    ctx.fill();
+    // 耳朵
+    ctx.fillStyle = '#3a3a4a';
+    ctx.beginPath();
+    ctx.moveTo(wo.x + 4, wo.y - 5);
+    ctx.lineTo(wo.x + 5, wo.y - 8);
+    ctx.lineTo(wo.x + 7, wo.y - 6);
+    ctx.closePath(); ctx.fill();
+    // 眼睛
+    ctx.fillStyle = '#ffe066';
+    ctx.fillRect(wo.x + 7, wo.y - 3, 1.5, 1.5);
+    // 尾巴
+    ctx.fillStyle = '#5a5a6a';
+    ctx.beginPath();
+    ctx.moveTo(wo.x - 6, wo.y);
+    ctx.lineTo(wo.x - 11, wo.y - 3);
+    ctx.lineTo(wo.x - 11, wo.y + 1);
+    ctx.closePath(); ctx.fill();
+  }
+
+  // === 海啸 ===
+  for (const t of tsunamis) {
+    ctx.fillStyle = 'rgba(60,150,220,0.65)';
+    ctx.fillRect(t.x - 40, 0, 80, H);
+    ctx.fillStyle = 'rgba(120,200,240,0.7)';
+    ctx.fillRect(t.x - 12, 0, 24, H);
+    // 浪头
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    for (let yy = 20; yy < H; yy += 30) {
+      const yo = Math.sin(yy * 0.1 + Date.now() / 80) * 6;
+      ctx.beginPath();
+      ctx.arc(t.x + 18 + yo, yy, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // 玩家（帅气小英雄：飘动红披风 + 蓝战袍 + 金宝石剑）
@@ -2212,9 +2658,10 @@ function draw() {
 
     ctx.textAlign = 'left';
     const cardW = (panelW - 30) / 2;
-    const cardH = (panelH - 75) / 5 - 4;
-    for (let i = 0; i < SKILL_ORDER.length; i++) {
-      const id = SKILL_ORDER[i];
+    const visibleShop = getVisibleSkillOrder();
+    const cardH = (panelH - 75) / Math.max(5, Math.ceil(visibleShop.length / 2)) - 4;
+    for (let i = 0; i < visibleShop.length; i++) {
+      const id = visibleShop[i];
       const sk = SKILLS[id];
       const owned = player.ownedSkills.includes(id);
       const equipped = player.equippedSkill === id;
@@ -2393,6 +2840,10 @@ addEventListener('keydown', e => {
     fireBeams.length = 0;
     freezeWaves.length = 0;
     explosions.length = 0;
+    wolves.length = 0;
+    iceWalls.length = 0;
+    tsunamis.length = 0;
+    sandstormTime = 0;
     tornado.active = 0;
     for (let i = 0; i < INIT_SPAWN; i++) spawnEnemy();
   }
@@ -2493,13 +2944,14 @@ cv.addEventListener('pointerdown', e => {
     const panelH = Math.min(H - 40, 560);
     const px = (W - panelW) / 2, py = (H - panelH) / 2;
     const cardW = (panelW - 30) / 2;
-    const cardH = (panelH - 75) / 5 - 4;
-    for (let i = 0; i < SKILL_ORDER.length; i++) {
+    const visibleClick = getVisibleSkillOrder();
+    const cardH = (panelH - 75) / Math.max(5, Math.ceil(visibleClick.length / 2)) - 4;
+    for (let i = 0; i < visibleClick.length; i++) {
       const col = i % 2, row = Math.floor(i / 2);
       const cx = px + 10 + col * (cardW + 5);
       const cy = py + 65 + row * (cardH + 4);
       if (x >= cx && x <= cx + cardW && y >= cy && y <= cy + cardH) {
-        const id = SKILL_ORDER[i];
+        const id = visibleClick[i];
         const sk = SKILLS[id];
         if (player.ownedSkills.includes(id)) {
           player.equippedSkill = id;

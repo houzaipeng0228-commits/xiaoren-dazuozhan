@@ -297,13 +297,14 @@ const CODEX = {
 
 // 地图定义：每张图有专属背景色、装饰主题、怪池
 const MAPS = {
-  forest:  { name: '🌳 森林',  price: 0,   bgTop: '#5e9a4d', bgBot: '#3f7338', dust: '#3a6a3a', path: 'rgba(180,140,90,0.35)', enemyTypes: ['red','green','yellow','bird','bomber'], decorTheme: 'forest',  desc: '默认家园。所有怪物都会出现。' },
-  desert:  { name: '🏜️ 沙漠',  price: 150, bgTop: '#e3b878', bgBot: '#8a6035', dust: '#a67843', path: 'rgba(120,80,40,0.3)',   enemyTypes: ['yellow','red','bird'],                  decorTheme: 'desert',  desc: '黄沙烈日，黄三角与红怪盘踞。' },
-  ice:     { name: '❄️ 冰河',  price: 300, bgTop: '#d0e6f2', bgBot: '#7aa0bc', dust: '#a0c0d8', path: 'rgba(220,235,245,0.5)', enemyTypes: ['green','bomber','red'],                 decorTheme: 'ice',     desc: '冰天雪地，绿怪和自爆冰球出没。' },
-  ocean:   { name: '🌊 海洋',  price: 500, bgTop: '#4a9ed8', bgBot: '#1d4f80', dust: '#3a7fb0', path: 'rgba(220,255,255,0.2)', enemyTypes: ['green','bird','yellow'],                decorTheme: 'ocean',   desc: '深蓝海域，绿怪和飞鱼环绕珊瑚。' },
-  volcano: { name: '🌋 火山',  price: 800, bgTop: '#7a2828', bgBot: '#1a0808', dust: '#3a1010', path: 'rgba(220,80,30,0.45)',  enemyTypes: ['red','bomber','yellow'],                decorTheme: 'volcano', desc: '熔岩流淌，红怪、自爆球和黄三角横行。' },
+  forest:  { name: '🌳 森林',     price: 0,   bgTop: '#5e9a4d', bgBot: '#3f7338', dust: '#3a6a3a', path: 'rgba(180,140,90,0.35)', enemyTypes: ['red','green','yellow','bird','bomber'], decorTheme: 'forest',  desc: '默认家园。所有怪物都会出现。' },
+  desert:  { name: '🏜️ 沙漠',     price: 150, bgTop: '#e3b878', bgBot: '#8a6035', dust: '#a67843', path: 'rgba(120,80,40,0.3)',   enemyTypes: ['yellow','red','bird'],                  decorTheme: 'desert',  desc: '黄沙烈日，黄三角与红怪盘踞。' },
+  ice:     { name: '❄️ 冰河',     price: 300, bgTop: '#d0e6f2', bgBot: '#7aa0bc', dust: '#a0c0d8', path: 'rgba(220,235,245,0.5)', enemyTypes: ['green','bomber','red'],                 decorTheme: 'ice',     desc: '冰天雪地，绿怪和自爆冰球出没。' },
+  animal:  { name: '🦁 动物世界', price: 400, bgTop: '#b4cf78', bgBot: '#6b8a3a', dust: '#5a7a2a', path: 'rgba(180,140,90,0.4)',  enemyTypes: ['red','yellow','bird'],                  decorTheme: 'animal',  desc: '广阔草原，狮子、猎豹与飞鸟交错出没。' },
+  ocean:   { name: '🌊 海洋',     price: 500, bgTop: '#4a9ed8', bgBot: '#1d4f80', dust: '#3a7fb0', path: 'rgba(220,255,255,0.2)', enemyTypes: ['green','bird','yellow'],                decorTheme: 'ocean',   desc: '深蓝海域，绿怪和飞鱼环绕珊瑚。' },
+  volcano: { name: '🌋 火山',     price: 800, bgTop: '#7a2828', bgBot: '#1a0808', dust: '#3a1010', path: 'rgba(220,80,30,0.45)',  enemyTypes: ['red','bomber','yellow'],                decorTheme: 'volcano', desc: '熔岩流淌，红怪、自爆球和黄三角横行。' },
 };
-const MAP_ORDER = ['forest', 'desert', 'ice', 'ocean', 'volcano'];
+const MAP_ORDER = ['forest', 'desert', 'ice', 'animal', 'ocean', 'volcano'];
 
 // 商店建筑（左上角）
 const shop = { x: 70, y: 70, w: 70, h: 60 };
@@ -328,6 +329,7 @@ const DECOR_THEMES = {
   ice:     [{ t: 'iceCrystal', n: 10 }, { t: 'snowMound', n: 6 }, { t: 'rock', n: 4 }],
   ocean:   [{ t: 'coral', n: 10 }, { t: 'seaweed', n: 8 }, { t: 'rock', n: 5 }],
   volcano: [{ t: 'lavaCrack', n: 12 }, { t: 'volcanoRock', n: 6 }, { t: 'rock', n: 5 }],
+  animal:  [{ t: 'pawPrint', n: 12 }, { t: 'palmTree', n: 4 }, { t: 'tallGrass', n: 8 }, { t: 'bone', n: 4 }],
 };
 function seedDecorations() {
   decorations.length = 0;
@@ -343,7 +345,7 @@ function seedDecorations() {
         tries++;
       } while (tries < 8 && (
         (x < shop.x + shop.w + 30 && y < shop.y + shop.h + 30) ||
-        (Math.hypot(x - W/2, y - H/2) < 70 && (cfg.t === 'tree' || cfg.t === 'cactus' || cfg.t === 'iceCrystal' || cfg.t === 'coral' || cfg.t === 'volcanoRock'))
+        (Math.hypot(x - W/2, y - H/2) < 70 && (cfg.t === 'tree' || cfg.t === 'cactus' || cfg.t === 'iceCrystal' || cfg.t === 'coral' || cfg.t === 'volcanoRock' || cfg.t === 'palmTree'))
       ));
       const d = { type: cfg.t, x, y };
       if (cfg.t === 'flower') d.color = ['#ff5f7a', '#ffd93d', '#a78bfa'][Math.floor(Math.random() * 3)];
@@ -1250,6 +1252,109 @@ function draw() {
       ctx.fillRect(d.x - 4, d.y - 3, 2, 6);
       ctx.fillStyle = '#ff5020';
       ctx.fillRect(d.x + 1, d.y - 2, 1, 4);
+    } else if (d.type === 'pawPrint') {
+      // 动物爪印：4 个小指 + 掌心
+      ctx.fillStyle = '#5a3a1a';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y + 1, 4, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      for (let k = -1; k <= 1; k++) {
+        ctx.beginPath();
+        ctx.arc(d.x + k * 3, d.y - 3, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.beginPath();
+      ctx.arc(d.x - 4, d.y - 1, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(d.x + 4, d.y - 1, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.type === 'palmTree') {
+      // 椰子树：阴影 + 树干 + 散开的叶子 + 椰子
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y + 18, 16, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // 树干（弯曲）
+      ctx.fillStyle = '#7a4a20';
+      ctx.beginPath();
+      ctx.moveTo(d.x - 3, d.y + 18);
+      ctx.quadraticCurveTo(d.x + 1, d.y, d.x - 1, d.y - 14);
+      ctx.quadraticCurveTo(d.x - 5, d.y, d.x - 6, d.y + 18);
+      ctx.closePath(); ctx.fill();
+      // 树干环纹
+      ctx.strokeStyle = '#4a2a10';
+      ctx.lineWidth = 0.6;
+      for (let k = 0; k < 3; k++) {
+        ctx.beginPath();
+        ctx.moveTo(d.x - 5, d.y + 4 - k * 8);
+        ctx.lineTo(d.x - 1, d.y + 4 - k * 8);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 1;
+      // 椰叶（5 片向外散开）
+      ctx.fillStyle = '#2d8c3f';
+      const top = { x: d.x - 1, y: d.y - 14 };
+      for (let k = 0; k < 5; k++) {
+        const ang = (k - 2) * 0.55 - Math.PI / 2;
+        const tx = top.x + Math.cos(ang) * 14;
+        const ty = top.y + Math.sin(ang) * 8;
+        ctx.beginPath();
+        ctx.moveTo(top.x, top.y);
+        ctx.quadraticCurveTo(top.x + Math.cos(ang) * 6, top.y + Math.sin(ang) * 5 - 1, tx, ty);
+        ctx.lineTo(tx + Math.cos(ang + 0.4) * 2, ty + Math.sin(ang + 0.4) * 2);
+        ctx.quadraticCurveTo(top.x + Math.cos(ang) * 6, top.y + Math.sin(ang) * 5 + 1, top.x, top.y);
+        ctx.closePath(); ctx.fill();
+      }
+      // 椰子
+      ctx.fillStyle = '#4a2a10';
+      ctx.beginPath();
+      ctx.arc(top.x - 2, top.y + 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(top.x + 3, top.y + 1, 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (d.type === 'tallGrass') {
+      // 高草丛：3-4 根竖直绿草
+      ctx.strokeStyle = '#3a7a3a';
+      ctx.lineWidth = 1.5;
+      const blades = 4;
+      for (let k = 0; k < blades; k++) {
+        const bx = d.x + (k - blades/2 + 0.5) * 3;
+        const sway = Math.sin(Date.now() / 700 + d.x * 0.02 + k) * 1;
+        ctx.beginPath();
+        ctx.moveTo(bx, d.y + 5);
+        ctx.quadraticCurveTo(bx + sway, d.y - 2, bx + sway * 1.5, d.y - 10);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 1;
+      // 一点黄色花尖
+      ctx.fillStyle = '#ffe066';
+      ctx.fillRect(d.x - 1, d.y - 11, 2, 2);
+    } else if (d.type === 'bone') {
+      // 骨头：两端球 + 中间细
+      ctx.fillStyle = '#f0e8d0';
+      ctx.beginPath();
+      ctx.arc(d.x - 5, d.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(d.x - 5, d.y - 2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(d.x + 5, d.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(d.x + 5, d.y - 2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(d.x - 5, d.y - 1, 10, 3);
+      // 描边
+      ctx.strokeStyle = '#a8a090';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(d.x - 4, d.y + 2);
+      ctx.lineTo(d.x + 4, d.y + 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
     }
   }
 
